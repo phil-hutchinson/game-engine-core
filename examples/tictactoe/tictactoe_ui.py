@@ -19,7 +19,7 @@ class TicTacToeUI(GameUI[TicTacToePly, TicTacToePosition]):
             f"---+---+---\n"
             f" {b[3]} | {b[4]} | {b[5]} \n"
             f"---+---+---\n"
-            f" {b[6]} | {b[7]} | {b[8]} "
+            f" {b[6]} | {b[7]} | {b[8]} \n"
         )
 
     def get_next_ply(self, position: TicTacToePosition) -> TicTacToePly:

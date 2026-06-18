@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Literal, Protocol
+from typing import Literal, Protocol, Self
 from collections.abc import Sequence
 
 from .game_ply import GamePly
@@ -20,6 +20,6 @@ class GamePosition[TGamePly: GamePly]  (Protocol):
         """Get all legal plies from this position."""
         ...
     
-    def apply_ply(self, ply: TGamePly) -> GamePosition[TGamePly]:
+    def apply_ply(self, ply: TGamePly) -> Self:
         """Apply a ply and return the resulting position with next player to move."""
         ...

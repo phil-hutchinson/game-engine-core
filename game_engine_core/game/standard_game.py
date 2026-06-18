@@ -1,21 +1,23 @@
-from typing import Literal,Tuple,List
+from typing import Literal,Tuple,List,Any
 from ..protocols.player import Player
 from ..protocols.game_ply import GamePly
 from ..protocols.game_position import GamePosition
 from ..protocols.game_ui import GameUI
 from ..models.game_result import GameResult
 
-class StandardGame[TPly: GamePly, TPosition: GamePosition[GamePly]]:
+class StandardGame[TPly: GamePly, TPosition: GamePosition[Any]]:
 
     def __init__(
         self,
         initial_position: TPosition,
         players: dict[Literal[1, -1], Player[TPly, TPosition]],
         game_ui: GameUI[TPly, TPosition],
+        render_final_board: bool = True,
     ):
         self._initial_position = initial_position
         self._players = players
         self._game_ui = game_ui
+        self._render_final_board = render_final_board
 
     def run(self) -> GameResult:
         position = self._initial_position
@@ -32,6 +34,9 @@ class StandardGame[TPly: GamePly, TPosition: GamePosition[GamePly]]:
             ply = player.select_ply(position)
             position = position.apply_ply(ply)
             game_log.append((str(ply), self._game_ui.text_board(position)))
+
+        if self._render_final_board:
+            self._game_ui.render_board(position)
 
         return GameResult(
             outcome=position.outcome,
