@@ -1,0 +1,25 @@
+from __future__ import annotations
+from typing import Literal, Protocol
+from collections.abc import Sequence
+
+from .game_ply import GamePly
+
+class GamePosition[TGamePly: GamePly]  (Protocol):
+    @property
+    def outcome(self) -> Literal[1, 0, -1] | None:
+        """Game outcome: 1 (p1 win), 0 (draw), -1 (p2 win), None (ongoing)."""
+        ...
+    
+    @property
+    def active_player_id(self) -> Literal[1, -1]:
+        """Which player's turn it is: 1 for player 1, -1 for player 2."""
+        ...
+
+    @property 
+    def legal_plies(self) -> Sequence[TGamePly]:
+        """Get all legal plies from this position."""
+        ...
+    
+    def apply_ply(self, ply: TGamePly) -> GamePosition[TGamePly]:
+        """Apply a ply and return the resulting position with next player to move."""
+        ...
