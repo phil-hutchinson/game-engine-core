@@ -8,5 +8,5 @@ class PositionEvaluator[TPly: GamePly, TPosition: GamePosition[Any]](Protocol):
     """Protocol for evaluating game positions."""
     
     def evaluate_position(self, position: TPosition) -> PositionEvaluation:
-        """Evaluate position and cost of evaluation."""
+        """Evaluate position from the active player's perspective (current-player-relative)."""
         ...

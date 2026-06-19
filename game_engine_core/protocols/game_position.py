@@ -7,7 +7,7 @@ from .game_ply import GamePly
 class GamePosition[TGamePly: GamePly]  (Protocol):
     @property
     def outcome(self) -> Literal[1, 0, -1] | None:
-        """Game outcome: 1 (p1 win), 0 (draw), -1 (p2 win), None (ongoing)."""
+        """Game outcome (current-player-relative): 1 (active player wins), 0 (draw), -1 (active player loses), None (ongoing)."""
         ...
     
     @property

@@ -1,4 +1,4 @@
-from typing import Literal,Tuple,List,Any
+from typing import Literal, Tuple, List, Any
 from ..protocols.player import Player
 from ..protocols.game_ply import GamePly
 from ..protocols.game_position import GamePosition
@@ -38,8 +38,10 @@ class StandardGame[TPly: GamePly, TPosition: GamePosition[Any]]:
         if self._render_final_board:
             self._game_ui.render_board(position)
 
+        # position stores outcome relative to the player to move - change to non-relative value for output purposes
+        absolute_outcome = position.outcome * position.active_player_id
         return GameResult(
-            outcome=position.outcome,
+            outcome=absolute_outcome,
             opening_board=opening_board,
             game_log=game_log,
         )

@@ -30,12 +30,12 @@ class TicTacToePosition(GamePosition[TicTacToePly]):
 
     @property
     def outcome(self) -> Literal[1, 0, -1] | None:
+        opponent = -self._active_player_id
         for line in WINNING_LINES:
-            values = [self._board[i] for i in line]
-            if values == [1, 1, 1]:
-                return 1
-            if values == [-1, -1, -1]:
-                return -1
+            if all(self._board[i] == opponent for i in line):
+                return -1  # opponent won; active player lost
+            if all(self._board[i] == self._active_player_id for i in line):
+                return 1   # active player has a winning line
         if 0 not in self._board:
             return 0  # draw
         return None

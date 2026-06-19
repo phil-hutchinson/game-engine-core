@@ -16,7 +16,7 @@ class MCTSNode[TPosition: GamePosition[Any], TPly: GamePly]:
     position: TPosition
     parent: MCTSNode[TPosition, TPly] | None
     ply_from_parent: TPly | None  # ply that led to this position
-    children: list[MCTSNode[TPosition, TPly]] = field(default_factory=list)
+    children: list[MCTSNode[TPosition, TPly]] = field(default_factory=lambda: [])
     unexplored_plies: list[TPly] | None = None
 
     # MCTS statistics
@@ -115,11 +115,10 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
     def _evaluate_node(self, node: MCTSNode[TPosition, TPly]) -> float:
         """Evaluate the node using the position evaluator."""
         outcome = node.position.outcome
-        active = node.position.active_player_id
         if outcome is not None:
-            return float(outcome) * active
+            return float(outcome)
 
-        return self.evaluator.evaluate_position(node.position).value * active
+        return self.evaluator.evaluate_position(node.position).value
 
     def _backpropagate(self, node: MCTSNode[TPosition, TPly], value: float) -> None:
         """Update statistics for this node and all ancestors."""

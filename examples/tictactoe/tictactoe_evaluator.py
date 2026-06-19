@@ -7,4 +7,4 @@ from .tictactoe_position import TicTacToePosition
 class TicTacToeEvaluator(PositionEvaluator[TicTacToePly, TicTacToePosition]):
 
     def evaluate_position(self, position: TicTacToePosition) -> PositionEvaluation:
-        return PositionEvaluation(value=0.0, evaluation_cost=0.0)
+        return PositionEvaluation(value=0.0)
