@@ -3,40 +3,49 @@ from game_engine_core.game.standard_game import StandardGame
 from game_engine_core.players.human_player import HumanPlayer
 from game_engine_core.players.ai_player import AIPlayer
 from game_engine_core.engines.random_engine import RandomEngine
+from game_engine_core.engines.mcts_engine import MCTSEngine
 from game_engine_core.models.game_result import GameResult
 from .tictactoe_ply import TicTacToePly
 from .tictactoe_position import TicTacToePosition
 from .tictactoe_ui import TicTacToeUI
+from .tictactoe_evaluator import TicTacToeEvaluator
+
+
+def make_player(choice: str, symbol: str, ui: TicTacToeUI, render_before_ply: bool):
+    match choice:
+        case "human":
+            return HumanPlayer(game_ui=ui, name=f"Player {symbol}")
+        case "random":
+            engine: RandomEngine[TicTacToePly, TicTacToePosition] = RandomEngine()
+            return AIPlayer(engine=engine, name=f"Random ({symbol})", render_before_ply=render_before_ply)
+        case "strategic":
+            engine2: MCTSEngine[TicTacToePly, TicTacToePosition, TicTacToeEvaluator] = MCTSEngine(evaluator=TicTacToeEvaluator())
+            return AIPlayer(engine=engine2, name=f"MCTS ({symbol})", render_before_ply=render_before_ply)
+        case _:
+            raise ValueError(f"Unknown player type: {choice}")
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "mode",
-        nargs="?",
-        default="hvh",
-        choices=["hvh", "hvai", "aivh", "aivai"],
+        "--p1",
+        default="human",
+        choices=["human", "random", "strategic"],
+        help="Player 1 (X): human, random, or strategic",
+    )
+    parser.add_argument(
+        "--p2",
+        default="human",
+        choices=["human", "random", "strategic"],
+        help="Player 2 (O): human, random, or strategic",
     )
     args = parser.parse_args()
 
     ui = TicTacToeUI()
-    engine: RandomEngine[TicTacToePly, TicTacToePosition] = RandomEngine()
+    both_ai = args.p1 != "human" and args.p2 != "human"
 
-    match args.mode:
-        case "hvh":
-            p1 = HumanPlayer(game_ui=ui, name="Player X")
-            p2 = HumanPlayer(game_ui=ui, name="Player O")
-        case "hvai":
-            p1 = HumanPlayer(game_ui=ui, name="Player X")
-            p2 = AIPlayer(engine=engine, name="AI (O)")
-        case "aivh":
-            p1 = AIPlayer(engine=engine, name="AI (X)")
-            p2 = HumanPlayer(game_ui=ui, name="Player O")
-        case "aivai":
-            p1 = AIPlayer(engine=engine, name="AI (X)", render_before_ply=True)
-            p2 = AIPlayer(engine=engine, name="AI (O)", render_before_ply=True)
-        case _:
-            raise ValueError(f"Unexpected mode: {args.mode}")
+    p1 = make_player(args.p1, "X", ui, render_before_ply=both_ai)
+    p2 = make_player(args.p2, "O", ui, render_before_ply=both_ai)
 
     game = StandardGame(
         initial_position=TicTacToePosition.new_game(),

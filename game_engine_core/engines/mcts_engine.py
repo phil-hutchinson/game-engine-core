@@ -1,0 +1,193 @@
+from __future__ import annotations
+from dataclasses import dataclass, field
+import math
+import random
+from typing import Any
+
+from ..protocols.game_position import GamePosition
+from ..protocols.game_ply import GamePly
+from ..protocols.position_evaluator import PositionEvaluator
+
+
+@dataclass
+class MCTSNode[TPosition: GamePosition[Any], TPly: GamePly]:
+    """A node in the MCTS tree."""
+
+    position: TPosition
+    parent: MCTSNode[TPosition, TPly] | None
+    ply_from_parent: TPly | None  # ply that led to this position
+    children: list[MCTSNode[TPosition, TPly]] = field(default_factory=list)
+    unexplored_plies: list[TPly] | None = None
+
+    # MCTS statistics
+    visits: int = 0
+    total_value: float = 0.0
+
+    @property
+    def average_value(self) -> float:
+        """Average value from this node's perspective."""
+        if self.visits == 0:
+            return 0.0
+        return self.total_value / self.visits
+
+    @property
+    def is_fully_expanded(self) -> bool:
+        """True if all possible moves have been tried."""
+        return (self.unexplored_plies is not None) and len(self.unexplored_plies) == 0
+
+    def ucb1_value(self, exploration_constant: float = 1.41) -> float:
+        """Calculate UCB1 value for node selection."""
+        if self.visits == 0:
+            return float('inf')
+
+        if self.parent is None or self.parent.visits == 0:
+            return self.average_value
+
+        exploitation = -self.average_value
+        exploration = exploration_constant * \
+            math.sqrt(math.log(self.parent.visits) / self.visits)
+
+        return exploitation + exploration
+
+
+class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: PositionEvaluator[Any, Any]]:
+    """Monte Carlo Tree Search engine."""
+
+    TEMPERATURE: float = 0.0  # 0.0 = greedy (most-visited child); >0 = proportional randomness
+
+    def __init__(self, evaluator: TEvaluator, iterations: int = 200000, verbose: bool = False):
+        self.evaluator = evaluator
+        self.iterations = iterations
+        self.verbose = verbose
+
+    def select_ply(self, game_position: TPosition) -> TPly:
+        """Select the best move using MCTS."""
+        root: MCTSNode[TPosition, TPly] = MCTSNode(
+            position=game_position, parent=None, ply_from_parent=None
+        )
+
+        for _ in range(self.iterations):
+            self._mcts_iteration(root)
+
+        if self.TEMPERATURE == 0.0:
+            return self._select_best_ply(root)
+        else:
+            return self._select_best_ply_with_temperature(root, self.TEMPERATURE)
+
+    def _mcts_iteration(self, root: MCTSNode[TPosition, TPly]) -> None:
+        """Run one MCTS iteration: Select, Expand, Evaluate, Backpropagate."""
+        node = self._select_leaf(root)
+        expanded_node = self._expand_node(node)
+        value = self._evaluate_node(expanded_node)
+        self._backpropagate(expanded_node, value)
+
+    def _select_leaf(self, root: MCTSNode[TPosition, TPly]) -> MCTSNode[TPosition, TPly]:
+        """Select path down tree using UCB1 until reaching unexpanded node."""
+        current = root
+
+        while current.is_fully_expanded and current.children:
+            best_child = max(current.children, key=lambda child: child.ucb1_value())
+            current = best_child
+
+        return current
+
+    def _expand_node(self, node: MCTSNode[TPosition, TPly]) -> MCTSNode[TPosition, TPly]:
+        """Expand node by adding one new child, or return node if terminal."""
+        if node.position.outcome is not None:
+            return node
+
+        if node.unexplored_plies is None:
+            node.unexplored_plies = list(node.position.legal_plies)
+
+        if not node.unexplored_plies:
+            return node
+
+        ply = node.unexplored_plies.pop()
+        new_position = node.position.apply_ply(ply)
+        child: MCTSNode[TPosition, TPly] = MCTSNode(
+            position=new_position,
+            parent=node,
+            ply_from_parent=ply
+        )
+        node.children.append(child)
+        return child
+
+    def _evaluate_node(self, node: MCTSNode[TPosition, TPly]) -> float:
+        """Evaluate the node using the position evaluator."""
+        outcome = node.position.outcome
+        active = node.position.active_player_id
+        if outcome is not None:
+            return float(outcome) * active
+
+        return self.evaluator.evaluate_position(node.position).value * active
+
+    def _backpropagate(self, node: MCTSNode[TPosition, TPly], value: float) -> None:
+        """Update statistics for this node and all ancestors."""
+        current: MCTSNode[TPosition, TPly] | None = node
+
+        while current is not None:
+            current.visits += 1
+            current.total_value += value
+            current = current.parent
+            value = -value
+
+    def _select_best_ply(self, root: MCTSNode[TPosition, TPly]) -> TPly:
+        """Select move with highest visit count."""
+        if not root.children:
+            plies = list(root.position.legal_plies)
+            if not plies:
+                raise RuntimeError("No available moves - position should have been treated as terminal.")
+            return random.choice(plies)
+
+        best_child = max(root.children, key=lambda child: child.visits)
+        assert best_child.ply_from_parent is not None
+        return best_child.ply_from_parent
+
+    def _select_best_ply_with_temperature(self, root: MCTSNode[TPosition, TPly], temperature: float) -> TPly:
+        """Select move proportionally to visit counts, scaled by temperature."""
+        if not root.children:
+            if self.verbose:
+                print('No children. Choosing randomly.')
+            plies = list(root.position.legal_plies)
+            if not plies:
+                raise RuntimeError("No available moves - position should have been treated as terminal.")
+            return random.choice(plies)
+
+        visit_counts = [child.visits for child in root.children]
+        total_visits = sum(visit_counts)
+
+        if total_visits == 0:
+            if self.verbose:
+                print('No visits. Choosing randomly.')
+            plies = [child.ply_from_parent for child in root.children]
+            assert all(p is not None for p in plies)
+            return random.choice(plies)  # type: ignore[return-value]
+
+        probabilities = [(v / total_visits) ** (1.0 / temperature) for v in visit_counts]
+        total_prob = sum(probabilities)
+        probabilities = [p / total_prob for p in probabilities]
+
+        if self.verbose:
+            plies = [child.ply_from_parent for child in root.children]
+            scores = [child.average_value for child in root.children]
+            prob_percentages = [f"{p*100:.3f}%" for p in probabilities]
+            combined = sorted(
+                zip(plies, visit_counts, scores, probabilities, prob_percentages),
+                key=lambda x: x[3], reverse=True
+            )
+            parts = [f"({ply}, {v}, {s}, {pct})" for ply, v, s, _, pct in combined]
+            print(f"Move analysis (ply, visits, score, probability): [{', '.join(parts)}]")
+
+        rand_val = random.random()
+        cumulative = 0.0
+        for i, prob in enumerate(probabilities):
+            cumulative += prob
+            if rand_val <= cumulative:
+                assert root.children[i].ply_from_parent is not None
+                return root.children[i].ply_from_parent  # type: ignore[return-value]
+
+        if self.verbose:
+            print("Fallback to random.")
+        result = random.choice(root.children).ply_from_parent
+        assert result is not None
+        return result
