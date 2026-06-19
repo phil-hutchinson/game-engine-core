@@ -23,6 +23,10 @@ class MCTSNode[TPosition: GamePosition[Any], TPly: GamePly]:
     visits: int = 0
     total_value: float = 0.0
 
+    # Policy head output stored at evaluation time; distributed to children as priors on expansion.
+    prior: float = 1.0
+    policy: dict[str, float] | None = None
+
     @property
     def average_value(self) -> float:
         """Average value from this node's perspective."""
@@ -35,18 +39,16 @@ class MCTSNode[TPosition: GamePosition[Any], TPly: GamePly]:
         """True if all possible moves have been tried."""
         return (self.unexplored_plies is not None) and len(self.unexplored_plies) == 0
 
-    def ucb1_value(self, exploration_constant: float = 1.41) -> float:
-        """Calculate UCB1 value for node selection."""
-        if self.visits == 0:
-            return float('inf')
+    def puct_value(self, exploration_constant: float = 1.41) -> float:
+        """PUCT selection score (AlphaZero-style).
 
+        Reduces to UCT when all priors are uniform (policy=None on the evaluator).
+        """
         if self.parent is None or self.parent.visits == 0:
-            return self.average_value
+            return -self.average_value
 
         exploitation = -self.average_value
-        exploration = exploration_constant * \
-            math.sqrt(math.log(self.parent.visits) / self.visits)
-
+        exploration = exploration_constant * self.prior * math.sqrt(self.parent.visits) / (1 + self.visits)
         return exploitation + exploration
 
 
@@ -82,11 +84,11 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
         self._backpropagate(expanded_node, value)
 
     def _select_leaf(self, root: MCTSNode[TPosition, TPly]) -> MCTSNode[TPosition, TPly]:
-        """Select path down tree using UCB1 until reaching unexpanded node."""
+        """Select path down tree using PUCT until reaching an unexpanded node."""
         current = root
 
         while current.is_fully_expanded and current.children:
-            best_child = max(current.children, key=lambda child: child.ucb1_value())
+            best_child = max(current.children, key=lambda child: child.puct_value())
             current = best_child
 
         return current
@@ -104,10 +106,16 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
 
         ply = node.unexplored_plies.pop()
         new_position = node.position.apply_ply(ply)
+
+        prior = 1.0
+        if node.policy is not None:
+            prior = node.policy.get(str(ply), 1.0)
+
         child: MCTSNode[TPosition, TPly] = MCTSNode(
             position=new_position,
             parent=node,
-            ply_from_parent=ply
+            ply_from_parent=ply,
+            prior=prior,
         )
         node.children.append(child)
         return child
@@ -118,7 +126,10 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
         if outcome is not None:
             return float(outcome)
 
-        return self.evaluator.evaluate_position(node.position).value
+        result = self.evaluator.evaluate_position(node.position)
+        if result.policy is not None:
+            node.policy = dict(result.policy)
+        return result.value
 
     def _backpropagate(self, node: MCTSNode[TPosition, TPly], value: float) -> None:
         """Update statistics for this node and all ancestors."""
