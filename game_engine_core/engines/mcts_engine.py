@@ -44,6 +44,7 @@ class MCTSNode[TPosition: GamePosition[Any], TPly: GamePly]:
 
         Reduces to UCT when all priors are uniform (policy=None on the evaluator).
         """
+        assert self.parent is not None
         exploitation = -self.average_value
         exploration = exploration_constant * self.prior * math.sqrt(self.parent.visits) / (1 + self.visits)
         return exploitation + exploration
