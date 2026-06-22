@@ -1,8 +1,8 @@
 import random
 from typing import Any
 
-from game_engine_core.protocols.game_ply import GamePly
-from game_engine_core.protocols.game_position import GamePosition
+from ..protocols.game_ply import GamePly
+from ..protocols.game_position import GamePosition
 
 
 class RandomEngine[TGamePly: GamePly, TGamePosition: GamePosition[Any]]:

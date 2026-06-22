@@ -1,4 +1,4 @@
-from typing import Literal, Tuple, List, Any
+from typing import Literal, Any
 from ..protocols.player import Player
 from ..protocols.game_ply import GamePly
 from ..protocols.game_position import GamePosition
@@ -22,7 +22,7 @@ class StandardGame[TPly: GamePly, TPosition: GamePosition[Any]]:
     def run(self) -> GameResult:
         position = self._initial_position
         opening_board = self._game_ui.text_board(position)
-        game_log: List[Tuple[str, str]] = []
+        game_log: list[tuple[str, str]] = []
 
         while position.outcome is None:
             active_id = position.active_player_id

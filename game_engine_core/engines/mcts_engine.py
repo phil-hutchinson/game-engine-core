@@ -40,13 +40,10 @@ class MCTSNode[TPosition: GamePosition[Any], TPly: GamePly]:
         return (self.unexplored_plies is not None) and len(self.unexplored_plies) == 0
 
     def puct_value(self, exploration_constant: float = 1.41) -> float:
-        """PUCT selection score (AlphaZero-style).
+        """PUCT selection score.
 
         Reduces to UCT when all priors are uniform (policy=None on the evaluator).
         """
-        if self.parent is None or self.parent.visits == 0:
-            return -self.average_value
-
         exploitation = -self.average_value
         exploration = exploration_constant * self.prior * math.sqrt(self.parent.visits) / (1 + self.visits)
         return exploitation + exploration
@@ -56,6 +53,8 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
     """Monte Carlo Tree Search engine."""
 
     TEMPERATURE: float = 0.0  # 0.0 = greedy (most-visited child); >0 = proportional randomness
+    # TODO: when implementing temperature as a proper feature, replace this class constant with an __init__ parameter
+    # (temperature: float = 0.0, stored as self._temperature) and update select_ply to use self._temperature.
 
     def __init__(self, evaluator: TEvaluator, iterations: int = 200000, verbose: bool = False):
         self.evaluator = evaluator
@@ -109,7 +108,10 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
 
         prior = 1.0
         if node.policy is not None:
-            prior = node.policy.get(str(ply), 1.0)
+            ply_key = str(ply)
+            if ply_key not in node.policy:
+                raise ValueError(f"Policy missing entry for move '{ply_key}'")
+            prior = node.policy[ply_key]
 
         child: MCTSNode[TPosition, TPly] = MCTSNode(
             position=new_position,
