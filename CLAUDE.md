@@ -15,3 +15,11 @@ The folder `doc/plan/{story-name}/` (where the story name can be derived from th
 - **`story.md`** — the original story describing what was requested
 - **`implementation-plan.md`** — the plan describing what was intended to be implemented
 - **`\peer-review.md`** - a peer review that also includes status and resolution of peer review items
+
+## Implementation Strategy
+
+The **`implementation-plan.md`** will contain one or more steps, each with a testing strategy. Progress through steps one at a time, pausing after each one to receive confirmation from the developer that the step has been implemented correctly and that there are no issues. In the case that the testing is manual, you may provide the developer with a reminder of what needs to be tested and how this can be done.
+
+## Creation of Implementation Plans
+
+Before creating or modifying an `implementation-plan.md`, read `doc/guidelines/implementation-plan-guide.md` and follow it exactly.
