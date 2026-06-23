@@ -53,14 +53,11 @@ class MCTSNode[TPosition: GamePosition[Any], TPly: GamePly]:
 class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: PositionEvaluator[Any, Any]]:
     """Monte Carlo Tree Search engine."""
 
-    TEMPERATURE: float = 0.0  # 0.0 = greedy (most-visited child); >0 = proportional randomness
-    # TODO: when implementing temperature as a proper feature, replace this class constant with an __init__ parameter
-    # (temperature: float = 0.0, stored as self._temperature) and update select_ply to use self._temperature.
-
-    def __init__(self, evaluator: TEvaluator, iterations: int = 200000, verbose: bool = False):
+    def __init__(self, evaluator: TEvaluator, iterations: int = 200000, verbose: bool = False, temperature: float = 0.0):
         self.evaluator = evaluator
         self.iterations = iterations
         self.verbose = verbose
+        self._temperature = temperature
 
     def select_ply(self, game_position: TPosition) -> TPly:
         """Select the best move using MCTS."""
@@ -71,10 +68,10 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
         for _ in range(self.iterations):
             self._mcts_iteration(root)
 
-        if self.TEMPERATURE == 0.0:
+        if self._temperature == 0.0:
             return self._select_best_ply(root)
         else:
-            return self._select_best_ply_with_temperature(root, self.TEMPERATURE)
+            return self._select_best_ply_with_temperature(root, self._temperature)
 
     def _mcts_iteration(self, root: MCTSNode[TPosition, TPly]) -> None:
         """Run one MCTS iteration: Select, Expand, Evaluate, Backpropagate."""
