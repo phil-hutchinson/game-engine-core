@@ -1,15 +1,22 @@
 import argparse
+
 from game_engine_core.game.standard_game import StandardGame
 from game_engine_core.players.human_player import HumanPlayer
 from game_engine_core.players.ai_player import AIPlayer
 from game_engine_core.engines.random_engine import RandomEngine
 from game_engine_core.engines.mcts_engine import MCTSEngine
 from game_engine_core.models.game_result import GameResult
-from .tictactoe_ply import TicTacToePly
-from .tictactoe_position import TicTacToePosition
-from .tictactoe_ui import TicTacToeUI
-from game_engine_core.evaluators.null_evaluator import NullEvaluator
-from .tictactoe_heuristic_evaluator import TicTacToeHeuristicEvaluator
+from examples.tictactoe.tictactoe_ply import TicTacToePly
+from examples.tictactoe.tictactoe_position import TicTacToePosition
+from examples.tictactoe.tictactoe_ui import TicTacToeUI
+from .tictactoe_mlp import TicTacToeMLP
+from .tictactoe_nn_evaluator import TicTacToeNNEvaluator
+
+
+def _make_neural_engine() -> MCTSEngine[TicTacToePly, TicTacToePosition, TicTacToeNNEvaluator]:
+    model = TicTacToeMLP()
+    evaluator = TicTacToeNNEvaluator(model=model)
+    return MCTSEngine(evaluator=evaluator, iterations=10)
 
 
 def make_player(choice: str, symbol: str, ui: TicTacToeUI, render_before_ply: bool):
@@ -19,12 +26,8 @@ def make_player(choice: str, symbol: str, ui: TicTacToeUI, render_before_ply: bo
         case "random":
             engine: RandomEngine[TicTacToePly, TicTacToePosition] = RandomEngine()
             return AIPlayer(engine=engine, name=f"Random ({symbol})", render_before_ply=render_before_ply)
-        case "bruteforce":
-            engine2: MCTSEngine[TicTacToePly, TicTacToePosition, NullEvaluator[TicTacToePly, TicTacToePosition]] = MCTSEngine(evaluator=NullEvaluator(), iterations=200)
-            return AIPlayer(engine=engine2, name=f"Brute Force ({symbol})", render_before_ply=render_before_ply)
-        case "heuristic":
-            engine3: MCTSEngine[TicTacToePly, TicTacToePosition, TicTacToeHeuristicEvaluator] = MCTSEngine(evaluator=TicTacToeHeuristicEvaluator(), iterations=200)
-            return AIPlayer(engine=engine3, name=f"Heuristic ({symbol})", render_before_ply=render_before_ply)
+        case "neural":
+            return AIPlayer(engine=_make_neural_engine(), name=f"Neural ({symbol})", render_before_ply=render_before_ply)
         case _:
             raise ValueError(f"Unknown player type: {choice}")
 
@@ -34,14 +37,14 @@ def main():
     parser.add_argument(
         "--p1",
         default="human",
-        choices=["human", "random", "bruteforce", "heuristic"],
-        help="Player 1 (X): human, random, bruteforce, or heuristic",
+        choices=["human", "random", "neural"],
+        help="Player 1 (X): human, random, or neural",
     )
     parser.add_argument(
         "--p2",
         default="human",
-        choices=["human", "random", "bruteforce", "heuristic"],
-        help="Player 2 (O): human, random, bruteforce, or heuristic",
+        choices=["human", "random", "neural"],
+        help="Player 2 (O): human, random, or neural",
     )
     args = parser.parse_args()
 
@@ -58,10 +61,10 @@ def main():
     )
 
     result = game.run()
-    print_result(result)
+    _print_result(result)
 
 
-def print_result(result: GameResult):
+def _print_result(result: GameResult):
     if result.outcome == 1:
         print("Player X wins!")
     elif result.outcome == -1:

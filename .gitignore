@@ -20,3 +20,5 @@ Thumbs.db
 .vscode/
 
 .local/
+
+examples/tictactoe_learning/weights/
