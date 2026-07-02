@@ -1,5 +1,7 @@
 import argparse
 
+import torch
+
 from game_engine_core.game.standard_game import StandardGame
 from game_engine_core.players.human_player import HumanPlayer
 from game_engine_core.players.ai_player import AIPlayer
@@ -11,15 +13,23 @@ from examples.tictactoe.tictactoe_position import TicTacToePosition
 from examples.tictactoe.tictactoe_ui import TicTacToeUI
 from .tictactoe_mlp import TicTacToeMLP
 from .tictactoe_nn_evaluator import TicTacToeNNEvaluator
+from .train import WEIGHTS_PATH
 
 
-def _make_neural_engine() -> MCTSEngine[TicTacToePly, TicTacToePosition, TicTacToeNNEvaluator]:
+def _make_neural_engine(temperature: float = 0.0) -> MCTSEngine[TicTacToePly, TicTacToePosition, TicTacToeNNEvaluator]:
+    if not WEIGHTS_PATH.exists():
+        raise SystemExit(
+            f"No trained weights found at {WEIGHTS_PATH}.\n"
+            "Run `python -m examples.tictactoe_learning.train` first."
+        )
     model = TicTacToeMLP()
+    model.load_state_dict(torch.load(WEIGHTS_PATH))
+    model.eval()
     evaluator = TicTacToeNNEvaluator(model=model)
-    return MCTSEngine(evaluator=evaluator, iterations=10)
+    return MCTSEngine(evaluator=evaluator, iterations=10, temperature=temperature)
 
 
-def make_player(choice: str, symbol: str, ui: TicTacToeUI, render_before_ply: bool):
+def make_player(choice: str, symbol: str, ui: TicTacToeUI, render_before_ply: bool, temperature: float):
     match choice:
         case "human":
             return HumanPlayer(game_ui=ui, name=f"Player {symbol}")
@@ -27,7 +37,7 @@ def make_player(choice: str, symbol: str, ui: TicTacToeUI, render_before_ply: bo
             engine: RandomEngine[TicTacToePly, TicTacToePosition] = RandomEngine()
             return AIPlayer(engine=engine, name=f"Random ({symbol})", render_before_ply=render_before_ply)
         case "neural":
-            return AIPlayer(engine=_make_neural_engine(), name=f"Neural ({symbol})", render_before_ply=render_before_ply)
+            return AIPlayer(engine=_make_neural_engine(temperature), name=f"Neural ({symbol})", render_before_ply=render_before_ply)
         case _:
             raise ValueError(f"Unknown player type: {choice}")
 
@@ -46,13 +56,21 @@ def main():
         choices=["human", "random", "neural"],
         help="Player 2 (O): human, random, or neural",
     )
+    parser.add_argument(
+        "--temperature",
+        type=float,
+        default=0.0,
+        help="Softmax temperature for neural ply selection. 0.0 (default) always picks the "
+             "top move, so games are deterministic; higher values add variation at the cost "
+             "of strength. ~0.3 keeps near-best play with slight variety.",
+    )
     args = parser.parse_args()
 
     ui = TicTacToeUI()
     both_ai = args.p1 != "human" and args.p2 != "human"
 
-    p1 = make_player(args.p1, "X", ui, render_before_ply=both_ai)
-    p2 = make_player(args.p2, "O", ui, render_before_ply=both_ai)
+    p1 = make_player(args.p1, "X", ui, render_before_ply=both_ai, temperature=args.temperature)
+    p2 = make_player(args.p2, "O", ui, render_before_ply=both_ai, temperature=args.temperature)
 
     game = StandardGame(
         initial_position=TicTacToePosition.new_game(),

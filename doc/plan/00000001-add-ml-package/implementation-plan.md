@@ -22,6 +22,6 @@ Generate training data without training anything yet. Testable by running self-p
 
 ### Step 4: TrainingLoop + train.py
 
-The gradient descent loop. Run train.py, watch loss decrease, save weights, then play against the trained agent in main.py and observe improved play.
+The gradient descent loop. Run train.py, watch loss decrease, save weights, then change the neural network engine to use these weights when playing
 
 **Manual test:** Run `train.py` and observe loss decreasing. Then run `main.py` with `neural` vs `random` and observe the trained agent playing more purposefully than the random-weights version from step 2.

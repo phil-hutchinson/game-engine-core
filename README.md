@@ -59,14 +59,14 @@ First-time setup, core module only:
 
 ```bash
 python -m venv .venv
-pip install -e .  # omit [learning] if you don't need PyTorch
+pip install -e .
 ```
 
 First-time setup, core module and learning module:
 
 ```bash
 python -m venv .venv
-pip install -e ".[learning]"  # omit [learning] if you don't need PyTorch
+pip install -e ".[learning]"
 ```
 
 Each new terminal session:
