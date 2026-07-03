@@ -1,9 +1,9 @@
-from typing import Protocol
+from typing import Any, Protocol
 
 from .game_ply import GamePly
 from .game_position import GamePosition
 
-class Player[TPly: GamePly, TPosition: GamePosition[GamePly]](Protocol):
+class Player[TPly: GamePly, TPosition: GamePosition[Any]](Protocol):
     @property
     def name(self) -> str:
         """Display name of the player."""
