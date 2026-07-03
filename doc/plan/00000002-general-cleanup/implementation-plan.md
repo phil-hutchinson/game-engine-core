@@ -74,4 +74,4 @@ Verification (manual): Run `python -m examples.tictactoe --p1 heuristic --p2 ran
 
 ## After completion
 
-Update the Status and Resolution columns for findings #1, #5, #6, #7, #8, #9, #10 in [peer-review.md](peer-review.md) as each fix lands.
+Update the Status and Resolution columns for findings #1, #5, #6, #7, #8, #9, #10 in [story-peer-review.md](story-peer-review.md) as each fix lands.
