@@ -18,11 +18,12 @@ class EpochLoss:
 
     value: float # value loss i.e. PositionEvaluator error when evaluating board position
     policy: float # policy loss i.e. PositionEvaluator error when evaluating possible plies
+    policy_loss_weight: float = 1.0 # scaling factor the policy loss was weighted by during training
 
     @property
     def total(self) -> float:
         """The combined loss that gradient descent actually minimises."""
-        return self.value + self.policy
+        return self.value + self.policy_loss_weight * self.policy
 
 
 ValueLossFn = Callable[[Tensor, Tensor], Tensor]
@@ -41,8 +42,9 @@ in this caller-provided loss rather than inside TrainingLoop.
 class TrainingLoop:
     """Joint value/policy gradient descent over a collection of TrainingSamples.
 
-    Game-agnostic: the model defines the architecture, the optimizer, the update rule,
-    and the two loss functions how predictions are scored against their targets. The
+    Game-agnostic: the model defines the architecture, the optimizer defines the update
+    rule, and the two loss functions define how predictions are scored against their
+    targets. The
     loop only batches the samples, runs the forward/backward pass, and steps the
     optimizer.
 
@@ -119,7 +121,11 @@ class TrainingLoop:
                 policy_total += policy_loss
                 n_batches += 1
             # average the batch losses into a single per-epoch summary.
-            history.append(EpochLoss(value=value_total / n_batches, policy=policy_total / n_batches))
+            history.append(EpochLoss(
+                value=value_total / n_batches,
+                policy=policy_total / n_batches,
+                policy_loss_weight=self._policy_loss_weight,
+            ))
         return history
 
     def _train_batch(self, batch: Sequence[TrainingSample]) -> tuple[float, float]:
@@ -149,9 +155,10 @@ class TrainingLoop:
         # Pylance flags on this otherwise fully-typed call; the call itself is correct.)
         loss.backward()  # type: ignore
         
-        # Apply weights from previous step to model
+        # Apply this batch's gradients to the model weights
         self._optimizer.step()
 
-        # extract 
-        # .item() detaches from the graph; float(...) on a grad-tracked tensor would warn.
+        # Convert each single-element loss tensor to a plain Python float for reporting.
+        # (Note: .item() also detaches from the autograd graph; float(...) on a
+        # grad-tracked tensor would warn.)
         return value_loss.item(), policy_loss.item()

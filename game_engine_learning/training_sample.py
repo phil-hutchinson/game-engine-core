@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from torch import Tensor
 
 
-@dataclass
+@dataclass(frozen=True)
 class TrainingSample:
     encoded_position: Tensor
     """Encoded board state — output of NeuralNetworkEvaluator.encode_position."""

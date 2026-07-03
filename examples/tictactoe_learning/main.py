@@ -23,8 +23,7 @@ def _make_neural_engine(temperature: float = 0.0) -> MCTSEngine[TicTacToePly, Ti
             "Run `python -m examples.tictactoe_learning.train` first."
         )
     model = TicTacToeMLP()
-    model.load_state_dict(torch.load(WEIGHTS_PATH))
-    model.eval()
+    model.load_state_dict(torch.load(WEIGHTS_PATH, weights_only=True))
     evaluator = TicTacToeNNEvaluator(model=model)
     return MCTSEngine(evaluator=evaluator, iterations=10, temperature=temperature)
 

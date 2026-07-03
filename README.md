@@ -59,6 +59,8 @@ First-time setup, core module only:
 
 ```bash
 python -m venv .venv
+.venv\Scripts\activate   # Windows
+source .venv/bin/activate  # macOS/Linux
 pip install -e .
 ```
 
@@ -66,6 +68,8 @@ First-time setup, core module and learning module:
 
 ```bash
 python -m venv .venv
+.venv\Scripts\activate   # Windows
+source .venv/bin/activate  # macOS/Linux
 pip install -e ".[learning]"
 ```
 

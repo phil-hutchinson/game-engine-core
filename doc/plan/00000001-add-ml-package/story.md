@@ -51,6 +51,7 @@ A new example that imports game types from `examples/tictactoe/` and demonstrate
 - **`TicTacToeNNEvaluator`** — subclasses `NeuralNetworkEvaluator`, implements `encode_position` and `decode_policy`
 - **`train.py`** — runs self-play and training loop iterations; saves model weights to `examples/tictactoe_learning/weights/model.pt` (gitignored — weights are a derived artifact, not source)
 - **`main.py`** — loads weights from the above path and plays a game (human vs. trained AI, or trained AI vs. another agent); fails with a clear message if weights are not found ("run train.py first")
+- **`selfplay.py`** — diagnostic script that runs self-play games and prints summary statistics (value distribution, policy entropy), to confirm data collection is working before training
 
 ## Out of Scope
 

@@ -18,7 +18,12 @@ class NeuralNetworkEvaluator[TPly: GamePly, TPosition: GamePosition[Any]](ABC):
     Subclasses implement encode_position and decode_policy; this class handles
     the forward pass and assembles the PositionEvaluation.
 
-    The wrapped model must return (value_tensor, policy_logits) from forward().
+    The wrapped model's forward() must accept a batched input tensor of shape
+    (batch, *sample_shape) — where sample_shape is whatever encode_position
+    produces for a single position — and return (value_tensor, policy_logits),
+    each with a leading batch dimension. This matches how TrainingLoop feeds the
+    model; evaluate_position adds and removes the batch dimension itself, so the
+    model never needs to handle unbatched input.
     """
 
     def __init__(self, model: nn.Module):
@@ -28,8 +33,11 @@ class NeuralNetworkEvaluator[TPly: GamePly, TPosition: GamePosition[Any]](ABC):
     def encode_position(self, position: TPosition) -> Tensor:
         """Convert a game position into a tensor suitable for model input.
 
-        The tensor can be any shape accepted by the model (1-D for an MLP,
-        multi-dimensional for a CNN, etc.). Values should be encoded from the
+        The tensor represents a single position without a batch dimension —
+        1-D for an MLP, multi-dimensional for a CNN, etc. Callers add the batch
+        dimension themselves (evaluate_position wraps the sample in a batch of
+        size 1; TrainingLoop stacks samples into a batch). Values should be
+        encoded from the
         active player's perspective so the model always reasons about "my pieces"
         vs "opponent pieces" regardless of which player is moving.
 
@@ -63,16 +71,25 @@ class NeuralNetworkEvaluator[TPly: GamePly, TPosition: GamePosition[Any]](ABC):
         # Encode the board state into a tensor the model can process.
         encoded = self.encode_position(position)
 
+        # Always run inference in eval mode, regardless of what state the caller
+        # (e.g. TrainingLoop, which switches the shared model to train() and never
+        # restores it) left the model in. Matters for BatchNorm/Dropout layers.
+        self._model.eval()
+
         # Run the forward pass without building a gradient graph — we're doing
         # inference only, not training, so autograd tracking is unnecessary.
+        # unsqueeze(0) wraps the single sample in a batch of size 1, so the model
+        # sees the same (batch, …) shape here as it does in TrainingLoop.
         with torch.no_grad():
-            value_tensor, policy_logits = self._model(encoded)
+            value_tensor, policy_logits = self._model(encoded.unsqueeze(0))
 
-        # squeeze() removes the size-1 dimension the value head produces (shape
-        # (1,) → scalar tensor), then float() converts it to a plain Python float.
+        # squeeze() removes the size-1 batch and value-head dimensions (shape
+        # (1, 1) → scalar tensor), then float() converts it to a plain Python float.
         value = float(value_tensor.squeeze())
 
         # Convert raw logits to a masked probability distribution over legal moves.
-        policy = self.decode_policy(policy_logits, list(position.legal_plies))
+        # squeeze(0) drops the batch dimension so decode_policy receives logits for
+        # a single position, matching the unbatched shape encode_position produces.
+        policy = self.decode_policy(policy_logits.squeeze(0), list(position.legal_plies))
 
         return PositionEvaluation(value=value, policy=policy)

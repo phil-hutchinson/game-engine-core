@@ -20,7 +20,7 @@ def make_player(choice: str, symbol: str, ui: TicTacToeUI, render_before_ply: bo
             engine: RandomEngine[TicTacToePly, TicTacToePosition] = RandomEngine()
             return AIPlayer(engine=engine, name=f"Random ({symbol})", render_before_ply=render_before_ply)
         case "bruteforce":
-            engine2: MCTSEngine[TicTacToePly, TicTacToePosition, NullEvaluator[TicTacToePly, TicTacToePosition]] = MCTSEngine(evaluator=NullEvaluator(), iterations=200)
+            engine2: MCTSEngine[TicTacToePly, TicTacToePosition, NullEvaluator[TicTacToePly, TicTacToePosition]] = MCTSEngine(evaluator=NullEvaluator(), iterations=200_000)
             return AIPlayer(engine=engine2, name=f"Brute Force ({symbol})", render_before_ply=render_before_ply)
         case "heuristic":
             engine3: MCTSEngine[TicTacToePly, TicTacToePosition, TicTacToeHeuristicEvaluator] = MCTSEngine(evaluator=TicTacToeHeuristicEvaluator(), iterations=200)
