@@ -44,6 +44,7 @@ class MCTSNode[TPosition: GamePosition[Any], TPly: GamePly]:
 
         Reduces to UCT when all priors are uniform (policy=None on the evaluator).
         """
+        assert self.parent is not None
         exploitation = -self.average_value
         exploration = exploration_constant * self.prior * math.sqrt(self.parent.visits) / (1 + self.visits)
         return exploitation + exploration
@@ -52,28 +53,61 @@ class MCTSNode[TPosition: GamePosition[Any], TPly: GamePly]:
 class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: PositionEvaluator[Any, Any]]:
     """Monte Carlo Tree Search engine."""
 
-    TEMPERATURE: float = 0.0  # 0.0 = greedy (most-visited child); >0 = proportional randomness
-    # TODO: when implementing temperature as a proper feature, replace this class constant with an __init__ parameter
-    # (temperature: float = 0.0, stored as self._temperature) and update select_ply to use self._temperature.
-
-    def __init__(self, evaluator: TEvaluator, iterations: int = 200000, verbose: bool = False):
+    def __init__(self, evaluator: TEvaluator, iterations: int = 200000, verbose: bool = False, temperature: float = 0.0):
         self.evaluator = evaluator
         self.iterations = iterations
         self.verbose = verbose
+        self._temperature = temperature
 
     def select_ply(self, game_position: TPosition) -> TPly:
-        """Select the best move using MCTS."""
+        """Select the best ply using MCTS."""
+        root = self._build_tree(game_position)
+        return self._choose_ply(root)
+
+    def select_ply_with_policy(self, game_position: TPosition) -> tuple[TPly, dict[str, float]]:
+        """Select the best ply and return the MCTS visit distribution over all legal plies.
+
+        The visit distribution is the normalised visit count for each legal ply at the root,
+        including unexplored plies (which receive 0 visits and thus 0 probability). It is
+        used as the policy training target during self-play data collection.
+
+        Returns:
+            A tuple of (selected_ply, policy) where policy maps str(ply) to probability
+            for every legal ply in the position.
+        """
+        root = self._build_tree(game_position)
+        return self._choose_ply(root), self._visit_distribution(root)
+
+    def _build_tree(self, game_position: TPosition) -> MCTSNode[TPosition, TPly]:
+        """Run all MCTS iterations from the given position and return the root node."""
         root: MCTSNode[TPosition, TPly] = MCTSNode(
             position=game_position, parent=None, ply_from_parent=None
         )
-
         for _ in range(self.iterations):
             self._mcts_iteration(root)
+        return root
 
-        if self.TEMPERATURE == 0.0:
+    def _choose_ply(self, root: MCTSNode[TPosition, TPly]) -> TPly:
+        """Select a ply from the root's children according to the temperature setting."""
+        if self._temperature == 0.0:
             return self._select_best_ply(root)
-        else:
-            return self._select_best_ply_with_temperature(root, self.TEMPERATURE)
+        return self._select_best_ply_with_temperature(root, self._temperature)
+
+    def _visit_distribution(self, root: MCTSNode[TPosition, TPly]) -> dict[str, float]:
+        """Return a normalised visit-count distribution over all legal plies at the root."""
+        legal_plies = list(root.position.legal_plies)
+        child_visits: dict[str, int] = {
+            str(child.ply_from_parent): child.visits
+            for child in root.children
+            if child.ply_from_parent is not None
+        }
+        # Include unexplored legal plies with 0 visits so the dict covers all legal plies.
+        counts = {str(ply): child_visits.get(str(ply), 0) for ply in legal_plies}
+        total = sum(counts.values())
+        if total == 0:
+            n = len(legal_plies)
+            return {k: 1.0 / n for k in counts}
+        return {k: v / total for k, v in counts.items()}
 
     def _mcts_iteration(self, root: MCTSNode[TPosition, TPly]) -> None:
         """Run one MCTS iteration: Select, Expand, Evaluate, Backpropagate."""

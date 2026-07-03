@@ -7,6 +7,11 @@ name = "game-engine-core"
 version = "0.1.0"
 requires-python = ">=3.12"
 
+[project.optional-dependencies]
+# numpy isn't imported directly by game_engine_learning; it's pinned here to silence
+# torch's "numpy not found" warning on import.
+learning = ["torch>=2.0", "numpy"]
+
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["game_engine_core*"]
+include = ["game_engine_core*", "game_engine_learning*"]

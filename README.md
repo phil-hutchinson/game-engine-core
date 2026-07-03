@@ -12,6 +12,7 @@ A game-agnostic Python engine framework for building board and turn-based games 
 | `game_engine_core.players` | `AIPlayer`, `HumanPlayer` |
 | `game_engine_core.evaluators` | `NullEvaluator` — uniform prior, used as a baseline |
 | `game_engine_core.models` | `GameResult`, `PositionEvaluation` (value + policy) |
+| `game_engine_learning` | Optional. `NeuralNetworkEvaluator` base class, self-play data collection, and training loop. Requires PyTorch. |
 
 ## Quick start
 
@@ -45,15 +46,36 @@ The engine never touches game-specific logic. Everything game-specific lives beh
 
 `MCTSEngine` uses PUCT selection (the same formula as AlphaZero). It accepts any `PositionEvaluator` implementation, so a neural network policy/value head can be dropped in without changing the search logic. The evaluator returns a `PositionEvaluation` with a scalar value (from the current player's perspective) and a policy dict mapping moves to prior probabilities.
 
-A shared learning subpackage (`game_engine_learning`) providing self-play loops, training infrastructure, and a `NeuralNetworkEvaluator` base class is planned — see `.local/idea-learning-package.md`.
+`game_engine_learning` provides self-play loops, training infrastructure, and a `NeuralNetworkEvaluator` base class. Subclass `NeuralNetworkEvaluator` and implement `encode_position` and `decode_policy` — the base class handles the forward pass and assembles the `PositionEvaluation`. See [`examples/tictactoe_learning`](examples/tictactoe_learning) for a complete example.
 
 ## Requirements
 
 - Python 3.12+
-- No runtime dependencies (learning subpackage will add PyTorch)
+- PyTorch 2.0+ (only required for `game_engine_learning`)
 
 ## Installation
 
+First-time setup, core module only:
+
 ```bash
+python -m venv .venv
+.venv\Scripts\activate   # Windows
+source .venv/bin/activate  # macOS/Linux
 pip install -e .
+```
+
+First-time setup, core module and learning module:
+
+```bash
+python -m venv .venv
+.venv\Scripts\activate   # Windows
+source .venv/bin/activate  # macOS/Linux
+pip install -e ".[learning]"
+```
+
+Each new terminal session:
+
+```bash
+.venv\Scripts\activate   # Windows
+source .venv/bin/activate  # macOS/Linux
 ```
