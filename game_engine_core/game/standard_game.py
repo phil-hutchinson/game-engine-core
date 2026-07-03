@@ -39,7 +39,8 @@ class StandardGame[TPly: GamePly, TPosition: GamePosition[Any]]:
             self._game_ui.render_board(position)
 
         # position stores outcome relative to the player to move - change to non-relative value for output purposes
-        absolute_outcome = position.outcome * position.active_player_id
+        # (the Literal annotation gives the checker the context to evaluate the product as literal math)
+        absolute_outcome: Literal[1, 0, -1] = position.outcome * position.active_player_id
         return GameResult(
             outcome=absolute_outcome,
             opening_board=opening_board,
