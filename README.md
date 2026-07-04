@@ -8,7 +8,7 @@ A game-agnostic Python engine framework for building board and turn-based games 
 |---|---|
 | `game_engine_core.protocols` | Abstract interfaces: `GamePosition`, `GamePly`, `GameEngine`, `Player`, `PositionEvaluator`, `GameUI` |
 | `game_engine_core.game` | `StandardGame` — the main game loop wiring players, engine, and UI together |
-| `game_engine_core.engines` | `MCTSEngine` (PUCT selection, configurable simulations), `RandomEngine` |
+| `game_engine_core.engines` | `MCTSEngine` (PUCT selection, configurable iterations), `RandomEngine` |
 | `game_engine_core.players` | `AIPlayer`, `HumanPlayer` |
 | `game_engine_core.evaluators` | `NullEvaluator` — uniform prior, used as a baseline |
 | `game_engine_core.models` | `GameResult`, `PositionEvaluation` (value + policy) |
@@ -19,16 +19,19 @@ A game-agnostic Python engine framework for building board and turn-based games 
 ```python
 from game_engine_core.game.standard_game import StandardGame
 from game_engine_core.engines.mcts_engine import MCTSEngine
+from game_engine_core.evaluators.null_evaluator import NullEvaluator
 from game_engine_core.players.ai_player import AIPlayer
 
-engine = MCTSEngine(num_simulations=200)
+engine = MCTSEngine(evaluator=NullEvaluator(), iterations=200_000)
 game = StandardGame(
-    position=MyGame.initial_position(),
-    engine=engine,
-    players=[AIPlayer(engine), AIPlayer(engine)],
-    ui=MyGameUI(),
+    initial_position=MyGamePosition.new_game(),
+    players={
+        1: AIPlayer(engine=engine, name="AI (X)"),
+        -1: AIPlayer(engine=engine, name="AI (O)"),
+    },
+    game_ui=MyGameUI(),
 )
-result = game.play()
+result = game.run()
 ```
 
 See [`examples/tictactoe`](examples/tictactoe) for a complete working implementation.

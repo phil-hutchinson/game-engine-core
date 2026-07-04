@@ -27,7 +27,12 @@ class EpochLoss:
 
 
 ValueLossFn = Callable[[Tensor, Tensor], Tensor]
-"""(predicted_values, target_values) -> scalar loss. Both tensors have shape (batch, 1)."""
+"""(predicted_values, target_values) -> scalar loss. Both tensors have shape (batch, 1).
+
+The returned scalar must be the mean loss over the batch (not the sum): epoch
+reporting weights each batch's loss by its sample count, which is only exact for
+mean-reduced losses.
+"""
 
 PolicyLossFn = Callable[[Tensor, Sequence[Mapping[str, float]]], Tensor]
 """(policy_logits, target_policies) -> scalar loss.
@@ -36,6 +41,10 @@ policy_logits has shape (batch, action_space); target_policies is the batch of M
 visit distributions keyed by str(ply). Aligning each str(ply) with its column in the
 logits is the one piece of game-specific knowledge the loop cannot supply, so it lives
 in this caller-provided loss rather than inside TrainingLoop.
+
+The returned scalar must be the mean loss over the batch (not the sum): epoch
+reporting weights each batch's loss by its sample count, which is only exact for
+mean-reduced losses.
 """
 
 
