@@ -1,0 +1,31 @@
+{
+    "name": "game-engine-core",
+    "build": {
+        "dockerfile": "Dockerfile"
+    },
+    "features": {
+        "ghcr.io/anthropics/devcontainer-features/claude-code:1.0": {}
+    },
+    // Persist Claude Code auth/settings/history across container rebuilds.
+    // CLAUDE_CONFIG_DIR keeps the .claude.json state file (onboarding, account
+    // metadata) inside the mounted dir too — by default it sits at ~/.claude.json,
+    // outside the volume, and is lost on rebuild.
+    "mounts": [
+        "source=claude-code-config-${devcontainerId},target=/home/vscode/.claude,type=volume"
+    ],
+    "containerEnv": {
+        "CLAUDE_CONFIG_DIR": "/home/vscode/.claude"
+    },
+    // Repair ownership on volumes created before the image pre-created the
+    // directory (Docker makes bare mount points root-owned).
+    "postCreateCommand": "sudo chown -R vscode:vscode /home/vscode/.claude",
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "ms-python.python",
+                "ms-python.vscode-pylance",
+                "charliermarsh.ruff"
+            ]
+        }
+    }
+}

@@ -6,11 +6,11 @@ Implements [story.md](story.md): a VS Code Dev Container as the within-repo deve
 
 ### Step 1 — Dev container scaffolding
 
-Create the `.devcontainer/` setup (a devcontainer definition and its container image definition): a Python 3.12+ base, the node runtime that CLI pyright requires, and the VS Code extensions the environment pre-installs (Python, Pylance, Ruff). No project installation yet — this step is environment scaffolding only, kept separate from behaviour per the plan guide.
+Create the `.devcontainer/` setup (a devcontainer definition and its container image definition): a Python 3.12+ base, the node runtime that CLI pyright requires, and the VS Code extensions the environment pre-installs (Python, Pylance, Ruff). Include Claude Code in the environment via Anthropic's official dev container feature, with a persistent named volume for its configuration directory so authentication and settings survive container rebuilds. Add a repository-level `.gitattributes` establishing line-ending normalization, so the same checkout presents a clean `git status` to both the Windows host git and the container's Linux git (without it, the two disagree on CRLF conversion and the container reports every text file as modified). No project installation yet — this step is environment scaffolding only, kept separate from behaviour per the plan guide.
 
 Depends on: nothing (everything else in the story runs inside this environment).
 
-Verification (manual): Reopen the repo in the dev container from VS Code. In the container terminal, confirm the Python interpreter reports 3.12+ and the node runtime is present; confirm the Python, Pylance, and Ruff extensions show as installed in the container. Pylance should type-check an open file (e.g. `game_engine_core/engines/mcts_engine.py`) without import errors for the standard library.
+Verification (manual): Reopen the repo in the dev container from VS Code. In the container terminal, confirm the Python interpreter reports 3.12+ and the node runtime is present; confirm the Python, Pylance, and Ruff extensions show as installed in the container. Pylance should type-check an open file (e.g. `game_engine_core/engines/mcts_engine.py`) without import errors for the standard library. Confirm `git status` inside the container reports a clean working tree (modulo this story's own files), and that `claude` launches in the container terminal and, after a one-time sign-in, remains authenticated after a container rebuild.
 
 ### Step 2 — Project installation as part of container provisioning
 
