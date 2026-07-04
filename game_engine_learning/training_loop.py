@@ -111,19 +111,18 @@ class TrainingLoop:
                 random.shuffle(order)
             value_total = 0.0
             policy_total = 0.0
-            n_batches = 0
             for start in range(0, len(order), batch_size):
                 # slice samples into a batch and train on it.
                 batch = [samples[i] for i in order[start:start + batch_size]]
                 value_loss, policy_loss = self._train_batch(batch)
-                # update totals for reporting purposes.
-                value_total += value_loss
-                policy_total += policy_loss
-                n_batches += 1
+                # update totals for reporting purposes, weighting each batch's mean loss
+                # by its sample count so a ragged final batch doesn't skew the epoch mean.
+                value_total += value_loss * len(batch)
+                policy_total += policy_loss * len(batch)
             # average the batch losses into a single per-epoch summary.
             history.append(EpochLoss(
-                value=value_total / n_batches,
-                policy=policy_total / n_batches,
+                value=value_total / len(samples),
+                policy=policy_total / len(samples),
                 policy_loss_weight=self._policy_loss_weight,
             ))
         return history
