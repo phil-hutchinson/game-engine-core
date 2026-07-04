@@ -27,7 +27,12 @@ class EpochLoss:
 
 
 ValueLossFn = Callable[[Tensor, Tensor], Tensor]
-"""(predicted_values, target_values) -> scalar loss. Both tensors have shape (batch, 1)."""
+"""(predicted_values, target_values) -> scalar loss. Both tensors have shape (batch, 1).
+
+The returned scalar must be the mean loss over the batch (not the sum): epoch
+reporting weights each batch's loss by its sample count, which is only exact for
+mean-reduced losses.
+"""
 
 PolicyLossFn = Callable[[Tensor, Sequence[Mapping[str, float]]], Tensor]
 """(policy_logits, target_policies) -> scalar loss.
@@ -36,6 +41,10 @@ policy_logits has shape (batch, action_space); target_policies is the batch of M
 visit distributions keyed by str(ply). Aligning each str(ply) with its column in the
 logits is the one piece of game-specific knowledge the loop cannot supply, so it lives
 in this caller-provided loss rather than inside TrainingLoop.
+
+The returned scalar must be the mean loss over the batch (not the sum): epoch
+reporting weights each batch's loss by its sample count, which is only exact for
+mean-reduced losses.
 """
 
 
@@ -111,19 +120,18 @@ class TrainingLoop:
                 random.shuffle(order)
             value_total = 0.0
             policy_total = 0.0
-            n_batches = 0
             for start in range(0, len(order), batch_size):
                 # slice samples into a batch and train on it.
                 batch = [samples[i] for i in order[start:start + batch_size]]
                 value_loss, policy_loss = self._train_batch(batch)
-                # update totals for reporting purposes.
-                value_total += value_loss
-                policy_total += policy_loss
-                n_batches += 1
+                # update totals for reporting purposes, weighting each batch's mean loss
+                # by its sample count so a ragged final batch doesn't skew the epoch mean.
+                value_total += value_loss * len(batch)
+                policy_total += policy_loss * len(batch)
             # average the batch losses into a single per-epoch summary.
             history.append(EpochLoss(
-                value=value_total / n_batches,
-                policy=policy_total / n_batches,
+                value=value_total / len(samples),
+                policy=policy_total / len(samples),
                 policy_loss_weight=self._policy_loss_weight,
             ))
         return history

@@ -30,6 +30,10 @@ Choose the verification method in this priority order:
 
 Each step's verification description should be concrete enough that the developer knows exactly what to run and what a passing result looks like.
 
+### Include a README check
+
+Every plan must include a step (typically the last) that verifies `README.md` is still accurate given the story's changes — updating it if the story alters anything the README describes (APIs, package layout, setup instructions), or confirming no update is needed. The `/update-readme` command automates this: it reviews the current branch diff and updates `README.md` if warranted.
+
 ## Example step format
 
 ```

@@ -133,6 +133,9 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
 
         if node.unexplored_plies is None:
             node.unexplored_plies = list(node.position.legal_plies)
+            # Shuffle once so expansion order carries no systematic bias from the
+            # ordering of legal_plies (pop() would otherwise always expand end-first).
+            random.shuffle(node.unexplored_plies)
 
         if not node.unexplored_plies:
             return node
