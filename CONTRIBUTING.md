@@ -1,5 +1,20 @@
 # Contributing
 
+## Development environment
+
+The repository ships a [VS Code Dev Container](.devcontainer/) as the supported development environment. With Docker and the VS Code **Dev Containers** extension installed, open the repository and choose **Reopen in Container**. The container provisions everything on first build: Python 3.12, the project installed editable with its `learning` extra, and the type-checking/linting toolchain — no manual setup and no virtual environment (the container is the isolation boundary).
+
+### Type checking and linting
+
+Run from the container terminal, from the repository root:
+
+```bash
+pyright        # type check
+ruff check .   # lint
+```
+
+Both tools are configured in `pyproject.toml` and both should pass clean before a change is submitted.
+
 ## Python version
 
 This project targets Python 3.12+. Follow up-to-date language standards accordingly.

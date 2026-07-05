@@ -58,27 +58,20 @@ The engine never touches game-specific logic. Everything game-specific lives beh
 
 ## Installation
 
-First-time setup, core module only:
+The package is not yet published to PyPI; install it directly from GitHub:
 
 ```bash
-python -m venv .venv
-.venv\Scripts\activate   # Windows
-source .venv/bin/activate  # macOS/Linux
-pip install -e .
+pip install "git+https://github.com/phil-hutchinson/game-engine-core.git"
 ```
 
-First-time setup, core module and learning module:
+To include the optional learning module (pulls in PyTorch):
 
 ```bash
-python -m venv .venv
-.venv\Scripts\activate   # Windows
-source .venv/bin/activate  # macOS/Linux
-pip install -e ".[learning]"
+pip install "game-engine-core[learning] @ git+https://github.com/phil-hutchinson/game-engine-core.git"
 ```
 
-Each new terminal session:
+Or from a local clone of the repository: `pip install .` (or `pip install ".[learning]"`).
 
-```bash
-.venv\Scripts\activate   # Windows
-source .venv/bin/activate  # macOS/Linux
-```
+## Contributing
+
+Contributor setup is separate from the installation above — the repo ships a VS Code Dev Container that provisions the full development environment automatically. See [CONTRIBUTING.md](CONTRIBUTING.md).

@@ -7,6 +7,8 @@ The folder `doc/plan/$ARGUMENTS/` should already contain two reference documents
 - **`story.md`** — the original story describing what was requested
 - **`implementation-plan.md`** — the plan describing what was intended to be implemented
 
+Before reviewing the diff, run `pyright` and `ruff check .` from the repository root. Note the result of each in the review document's Summary. If either reports findings, file each as a review comment at the appropriate severity (a type error is typically Critical or Major; a lint finding is typically Minor) — do not fix them.
+
 The review should cover not just code quality, but also discrepancies between these documents and the actual changes: requirements from the story that are missing or misimplemented, deviations from the implementation plan without apparent justification, and anything implemented that is not covered by either document. Also identify discrepancies between the story and the implementation plan.
 
 Also check that the implementation plan included a step to verify `README.md` is still up to date given the story's changes. If that step is absent, raise it as a comment.
