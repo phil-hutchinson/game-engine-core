@@ -13,6 +13,8 @@ pytest tests/core      # one package's tests
 pytest examples        # example tests only
 ```
 
+(Test paths are configured in `pyproject.toml`, so bare `pytest` from the root finds both suites.)
+
 pytest is pinned in the dev-container image (same policy as ruff and pyright: bump the pin deliberately, in a commit of its own) and configured in `pyproject.toml` under `[tool.pytest.ini_options]`.
 
 ## Layout: two suites
@@ -20,11 +22,14 @@ pytest is pinned in the dev-container image (same policy as ruff and pyright: bu
 The suite is deliberately split in two:
 
 ```
-tests/                      # package tests — the library's own regression suite
-    core/                   #   game_engine_core
-    learning/               #   game_engine_learning
-examples/tictactoe*/tests/  # example tests — also an example of how to test
+tests/                              # package tests — the library's own regression suite
+    core/                           #   game_engine_core (incl. nim_fixture.py, the fixture game)
+    learning/                       #   game_engine_learning (incl. nim_nn.py, a minimal torch model/evaluator)
+examples/tictactoe/tests/           # example tests — also an example of how to test
+examples/tictactoe_learning/tests/
 ```
+
+Support modules (`nim_fixture.py`, `nim_nn.py`) carry no `test_` prefix, so pytest does not collect them; they are imported by the test modules, the learning suite reaching the fixture game via `tests.core.nim_fixture`.
 
 **Package tests (`tests/`)** protect the library. They are self-contained: no imports from `examples/`, so the packages are tested exactly as an external consumer receives them. `tests/` is not included in the distribution (setuptools discovery includes only `game_engine_core*` and `game_engine_learning*`).
 
@@ -48,11 +53,12 @@ The coverage centres on the sign-convention logic identified by general-cleanup 
 | Area | Key assertions |
 |---|---|
 | Fixture game | Its own contract: current-player-relative outcome, legality, alternation |
-| `StandardGame` | Relative outcome at the terminal position converts to the correct absolute `GameResult.outcome` for either winner |
-| `MCTSEngine` | Forced win-in-1 is found; backpropagation flips the value sign per tree level; terminal nodes evaluate to their exact outcome; visit distribution covers all legal plies, sums to 1, uniform fallback; policy priors reach children; missing policy entry raises; temperature-0 picks the most-visited ply |
-| `SelfPlayCollector` | Target values alternate backwards from `-final_outcome` (the last ply was made by the *other* player than the terminal perspective) |
-| `TrainingLoop` | Reported epoch loss is the sample-weighted mean over batches, exact for ragged final batches (durable form of general-cleanup finding #7's scratch verification); empty input rejected |
-| `NeuralNetworkEvaluator` | Inference runs in eval mode even when training left the model in train mode |
+| `StandardGame` | Relative outcome at the terminal position converts to the correct absolute `GameResult.outcome` for either winner; game log records every ply |
+| `RandomEngine` | Selects only legal plies; raises on a position without plies |
+| `MCTSEngine` | Forced win-in-1 is found with correctly signed search values; backpropagation flips the value sign per tree level; terminal nodes evaluate to their exact outcome; visit distribution covers all legal plies, sums to 1, uniform fallback; policy priors reach children; missing policy entry raises; temperature-0 picks the most-visited ply |
+| `SelfPlayCollector` | Target values alternate backwards from `-final_outcome` (the last ply was made by the *other* player than the terminal perspective); encodings pair with their steps; policy targets present; samples accumulate across games |
+| `TrainingLoop` | Reported epoch loss is the sample-weighted mean over batches, exact for ragged final batches (durable form of general-cleanup finding #7's scratch verification, using a zero learning rate to freeze the model); loss decreases over epochs with a real learning rate; empty input rejected |
+| `NeuralNetworkEvaluator` | Value bounded, policy normalised over exactly the legal plies; inference runs in eval mode even when training left the model in train mode |
 | TicTacToe example | Ply validation; win/draw/legality with correct relative signs; heuristic evaluator policy sanity; `tictactoe_policy_loss` column mapping; MCTS finds a win-in-1 on a real board (integration) |
 
 ## Conventions
