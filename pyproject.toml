@@ -15,3 +15,7 @@ learning = ["torch>=2.0", "numpy"]
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["game_engine_core*", "game_engine_learning*"]
+
+[tool.pyright]
+# Scope to first-party code; keeps stray local dirs (e.g. an old .venv) out.
+include = ["game_engine_core", "game_engine_learning", "examples"]

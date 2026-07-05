@@ -7,6 +7,11 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
+# CLI pyright, baked into the image so the environment type-checks out of the
+# box. Unpinned: rebuilds track the current release, matching how the base
+# image and node runtime already float.
+RUN npm install -g pyright
+
 # Pre-create the Claude Code config dir owned by the container user, so the
 # named volume mounted here initializes writable (a bare mount point would be
 # root-owned and logins would fail to persist).
