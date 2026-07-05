@@ -7,6 +7,9 @@ build/
 venv/
 .env
 
+# Personal container environment (see devcontainer.json runArgs)
+.devcontainer/devcontainer.env
+
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/

@@ -1,13 +1,14 @@
 from __future__ import annotations
+
 from collections.abc import Sequence
 
 import torch
 import torch.nn.functional as F
 from torch import Tensor
 
-from game_engine_learning.neural_network_evaluator import NeuralNetworkEvaluator
 from examples.tictactoe.tictactoe_ply import TicTacToePly
 from examples.tictactoe.tictactoe_position import TicTacToePosition
+from game_engine_learning.neural_network_evaluator import NeuralNetworkEvaluator
 
 
 class TicTacToeNNEvaluator(NeuralNetworkEvaluator[TicTacToePly, TicTacToePosition]):

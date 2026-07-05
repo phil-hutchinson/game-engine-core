@@ -1,9 +1,11 @@
-from typing import Literal, Any
-from ..protocols.player import Player
+from typing import Any, Literal
+
+from ..models.game_result import GameResult
 from ..protocols.game_ply import GamePly
 from ..protocols.game_position import GamePosition
 from ..protocols.game_ui import GameUI
-from ..models.game_result import GameResult
+from ..protocols.player import Player
+
 
 class StandardGame[TPly: GamePly, TPosition: GamePosition[Any]]:
 

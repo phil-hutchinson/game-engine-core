@@ -1,0 +1,55 @@
+{
+    "name": "game-engine-core",
+    "build": {
+        "dockerfile": "Dockerfile"
+    },
+    "features": {
+        "ghcr.io/anthropics/devcontainer-features/claude-code:1.0": {}
+    },
+    // Persist Claude Code auth/settings/history across container rebuilds.
+    // CLAUDE_CONFIG_DIR keeps the .claude.json state file (onboarding, account
+    // metadata) inside the mounted dir too — by default it sits at ~/.claude.json,
+    // outside the volume, and is lost on rebuild.
+    "mounts": [
+        "source=claude-code-config-${devcontainerId},target=/home/vscode/.claude,type=volume"
+    ],
+    "containerEnv": {
+        // Nothing personal here: containerEnv becomes `docker run -e`, which
+        // overrides --env-file, so entries added here would clobber
+        // devcontainer.env values of the same name.
+        "CLAUDE_CONFIG_DIR": "/home/vscode/.claude"
+    },
+    // Personal, machine-local environment (e.g. TZ=America/Vancouver) goes in
+    // .devcontainer/devcontainer.env — gitignored, KEY=VALUE lines, applied
+    // container-wide. devcontainer.env.example is the template to rename.
+    "runArgs": [
+        "--env-file", ".devcontainer/devcontainer.env"
+    ],
+    // Docker fails on a missing --env-file, so ensure it exists before the
+    // container starts. Runs on the host: `touch` covers sh, `type NUL >>`
+    // covers cmd (Windows). touch must come first — cmd's "not recognized"
+    // complaint goes to the console, but dash prints the type failure to
+    // stdout, which the >> would otherwise capture into the env file.
+    "initializeCommand": "cd .devcontainer && (touch devcontainer.env || type NUL >> devcontainer.env)",
+    // 1) Repair ownership on volumes created before the image pre-created the
+    //    directory (Docker makes bare mount points root-owned).
+    // 2) Install the project editable with the learning extra into the
+    //    container's Python — no .venv; the container is the isolation
+    //    boundary. Torch/numpy are already baked into the image, so this
+    //    only links the workspace source and is fast on every rebuild.
+    "postCreateCommand": "sudo chown -R vscode:vscode /home/vscode/.claude && pip install --editable '.[learning]'",
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "ms-python.python",
+                "ms-python.vscode-pylance",
+                "charliermarsh.ruff"
+            ],
+            "settings": {
+                // Use the image's pinned ruff instead of the binary bundled
+                // with the extension, so the editor and `ruff check` agree.
+                "ruff.importStrategy": "fromEnvironment"
+            }
+        }
+    }
+}

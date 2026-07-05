@@ -15,3 +15,26 @@ learning = ["torch>=2.0", "numpy"]
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["game_engine_core*", "game_engine_learning*"]
+
+[tool.pyright]
+# Scope to first-party code; keeps stray local dirs (e.g. an old .venv) out.
+include = ["game_engine_core", "game_engine_learning", "examples"]
+# Pin the target version: pyright otherwise infers it from the interpreter it
+# happens to find (it does not read requires-python).
+pythonVersion = "3.12"
+
+[tool.ruff.lint]
+# Ruff's defaults (pyflakes, pycodestyle errors) plus: UP and TID for the
+# CONTRIBUTING.md language/import conventions, I to keep imports sorted,
+# B (bugbear) for likely-bug patterns.
+extend-select = ["UP", "TID", "I", "B"]
+
+[tool.ruff.lint.flake8-tidy-imports]
+# Examples import the library absolutely, like a consumer would; sibling
+# imports within one example stay relative. "parents" blocks ..-style reaches.
+ban-relative-imports = "parents"
+
+[tool.ruff.lint.per-file-ignores]
+# Relative imports are the required convention inside the packages.
+"game_engine_core/**" = ["TID252"]
+"game_engine_learning/**" = ["TID252"]

@@ -1,9 +1,10 @@
 from typing import Any
 
-from ..protocols.player import Player
 from ..protocols.game_ply import GamePly
 from ..protocols.game_position import GamePosition
 from ..protocols.game_ui import GameUI
+from ..protocols.player import Player
+
 
 class HumanPlayer[TPly: GamePly, TPosition: GamePosition[Any]](Player[TPly, TPosition]):
     

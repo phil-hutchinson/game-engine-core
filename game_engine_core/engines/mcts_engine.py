@@ -1,11 +1,12 @@
 from __future__ import annotations
-from dataclasses import dataclass, field
+
 import math
 import random
+from dataclasses import dataclass, field
 from typing import Any
 
-from ..protocols.game_position import GamePosition
 from ..protocols.game_ply import GamePly
+from ..protocols.game_position import GamePosition
 from ..protocols.position_evaluator import PositionEvaluator
 
 
@@ -221,7 +222,7 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
             scores = [child.average_value for child in root.children]
             prob_percentages = [f"{p*100:.3f}%" for p in probabilities]
             combined = sorted(
-                zip(plies, visit_counts, scores, probabilities, prob_percentages),
+                zip(plies, visit_counts, scores, probabilities, prob_percentages, strict=True),
                 key=lambda x: x[3], reverse=True
             )
             parts = [f"({ply}, {v}, {s}, {pct})" for ply, v, s, _, pct in combined]

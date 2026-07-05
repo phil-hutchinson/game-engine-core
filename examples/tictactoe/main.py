@@ -1,15 +1,17 @@
 import argparse
-from game_engine_core.game.standard_game import StandardGame
-from game_engine_core.players.human_player import HumanPlayer
-from game_engine_core.players.ai_player import AIPlayer
-from game_engine_core.engines.random_engine import RandomEngine
+
 from game_engine_core.engines.mcts_engine import MCTSEngine
+from game_engine_core.engines.random_engine import RandomEngine
+from game_engine_core.evaluators.null_evaluator import NullEvaluator
+from game_engine_core.game.standard_game import StandardGame
 from game_engine_core.models.game_result import GameResult
+from game_engine_core.players.ai_player import AIPlayer
+from game_engine_core.players.human_player import HumanPlayer
+
+from .tictactoe_heuristic_evaluator import TicTacToeHeuristicEvaluator
 from .tictactoe_ply import TicTacToePly
 from .tictactoe_position import TicTacToePosition
 from .tictactoe_ui import TicTacToeUI
-from game_engine_core.evaluators.null_evaluator import NullEvaluator
-from .tictactoe_heuristic_evaluator import TicTacToeHeuristicEvaluator
 
 
 def make_player(choice: str, symbol: str, ui: TicTacToeUI, render_before_ply: bool):

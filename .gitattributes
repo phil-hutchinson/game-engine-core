@@ -1,0 +1,4 @@
+# Normalize line endings in the index so Windows-host git and Linux-container
+# git agree on what "unmodified" means for the same bind-mounted checkout.
+* text=auto
+*.sh text eol=lf

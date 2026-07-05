@@ -1,6 +1,8 @@
 from game_engine_core.protocols.game_ui import GameUI
+
 from .tictactoe_ply import TicTacToePly
 from .tictactoe_position import TicTacToePosition
+
 
 class TicTacToeUI(GameUI[TicTacToePly, TicTacToePosition]):
 
@@ -9,8 +11,10 @@ class TicTacToeUI(GameUI[TicTacToePly, TicTacToePosition]):
 
     def text_board(self, position: TicTacToePosition) -> str:
         def symbol(val: int) -> str:
-            if val == 1: return 'X'
-            if val == -1: return 'O'
+            if val == 1:
+                return 'X'
+            if val == -1:
+                return 'O'
             return ' '
         
         b = [symbol(val) for val in position.board]

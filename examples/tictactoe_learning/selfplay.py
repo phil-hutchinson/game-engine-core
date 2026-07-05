@@ -8,11 +8,12 @@ Usage:
 """
 import math
 
-from game_engine_core.engines.mcts_engine import MCTSEngine
 from examples.tictactoe.tictactoe_ply import TicTacToePly
 from examples.tictactoe.tictactoe_position import TicTacToePosition
+from game_engine_core.engines.mcts_engine import MCTSEngine
 from game_engine_learning.self_play_collector import SelfPlayCollector
 from game_engine_learning.training_sample import TrainingSample
+
 from .tictactoe_mlp import TicTacToeMLP
 from .tictactoe_nn_evaluator import TicTacToeNNEvaluator
 

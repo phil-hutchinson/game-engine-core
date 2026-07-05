@@ -1,8 +1,9 @@
-from typing import Protocol, Any
+from typing import Any, Protocol
 
-from .game_position import GamePosition
-from .game_ply import GamePly
 from ..models.position_evaluation import PositionEvaluation
+from .game_ply import GamePly
+from .game_position import GamePosition
+
 
 class PositionEvaluator[TPly: GamePly, TPosition: GamePosition[Any]](Protocol):
     """Protocol for evaluating game positions."""

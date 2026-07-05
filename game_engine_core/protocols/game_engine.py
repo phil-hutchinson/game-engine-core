@@ -1,7 +1,8 @@
-from typing import Protocol,Any
+from typing import Any, Protocol
 
 from .game_ply import GamePly
 from .game_position import GamePosition
+
 
 class GameEngine[TGamePly: GamePly, TGamePosition: GamePosition[Any]](Protocol):
 

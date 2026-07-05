@@ -1,6 +1,9 @@
 from __future__ import annotations
+
 from typing import Literal, cast
+
 from game_engine_core.protocols.game_position import GamePosition
+
 from .tictactoe_ply import TicTacToePly
 
 Board = tuple[Literal[1, -1, 0], ...]
