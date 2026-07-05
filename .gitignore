@@ -10,6 +10,10 @@ venv/
 # Personal container environment (see devcontainer.json runArgs)
 .devcontainer/devcontainer.env
 
+# Personal Claude Code settings (e.g. command permission approvals);
+# shared commands in .claude/commands/ stay tracked
+.claude/settings.local.json
+
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
