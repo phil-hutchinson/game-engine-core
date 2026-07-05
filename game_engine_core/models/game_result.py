@@ -2,6 +2,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Literal
 
+
 @dataclass(frozen=True)
 class GameResult:
     outcome: Literal[1, 0, -1]

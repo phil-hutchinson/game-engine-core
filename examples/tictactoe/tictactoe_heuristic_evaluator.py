@@ -1,5 +1,6 @@
 from game_engine_core.models.position_evaluation import PositionEvaluation
-from .tictactoe_position import TicTacToePosition, WINNING_LINES, Board
+
+from .tictactoe_position import WINNING_LINES, Board, TicTacToePosition
 
 
 def _count_threats(board: Board, player: int) -> int:
@@ -61,6 +62,6 @@ class TicTacToeHeuristicEvaluator:
         legal = position.legal_plies
         scores = [_score_move(board, me, p.square - 1) for p in legal]
         total = sum(scores)
-        policy = {str(p): s / total for p, s in zip(legal, scores)}
+        policy = {str(p): s / total for p, s in zip(legal, scores, strict=True)}
 
         return PositionEvaluation(value=max(-1.0, min(1.0, score)), policy=policy)

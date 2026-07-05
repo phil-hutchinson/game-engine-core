@@ -2,15 +2,16 @@ import argparse
 
 import torch
 
-from game_engine_core.game.standard_game import StandardGame
-from game_engine_core.players.human_player import HumanPlayer
-from game_engine_core.players.ai_player import AIPlayer
-from game_engine_core.engines.random_engine import RandomEngine
-from game_engine_core.engines.mcts_engine import MCTSEngine
-from game_engine_core.models.game_result import GameResult
 from examples.tictactoe.tictactoe_ply import TicTacToePly
 from examples.tictactoe.tictactoe_position import TicTacToePosition
 from examples.tictactoe.tictactoe_ui import TicTacToeUI
+from game_engine_core.engines.mcts_engine import MCTSEngine
+from game_engine_core.engines.random_engine import RandomEngine
+from game_engine_core.game.standard_game import StandardGame
+from game_engine_core.models.game_result import GameResult
+from game_engine_core.players.ai_player import AIPlayer
+from game_engine_core.players.human_player import HumanPlayer
+
 from .tictactoe_mlp import TicTacToeMLP
 from .tictactoe_nn_evaluator import TicTacToeNNEvaluator
 from .train import WEIGHTS_PATH

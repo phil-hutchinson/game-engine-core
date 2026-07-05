@@ -9,6 +9,7 @@ Usage:
     python -m examples.tictactoe_learning.train
 """
 from __future__ import annotations
+
 import argparse
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -17,11 +18,12 @@ import torch
 import torch.nn.functional as F
 from torch import Tensor
 
+from examples.tictactoe.tictactoe_ply import TicTacToePly
+from examples.tictactoe.tictactoe_position import TicTacToePosition
 from game_engine_core.engines.mcts_engine import MCTSEngine
 from game_engine_learning.self_play_collector import SelfPlayCollector
 from game_engine_learning.training_loop import TrainingLoop
-from examples.tictactoe.tictactoe_ply import TicTacToePly
-from examples.tictactoe.tictactoe_position import TicTacToePosition
+
 from .tictactoe_mlp import TicTacToeMLP
 from .tictactoe_nn_evaluator import TicTacToeNNEvaluator
 

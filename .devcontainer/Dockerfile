@@ -12,6 +12,10 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
 # image and node runtime already float.
 RUN npm install -g pyright
 
+# CLI ruff, same rationale. The Ruff VS Code extension bundles its own binary;
+# this one serves the `ruff check` command line.
+RUN pip install --no-cache-dir ruff
+
 # Pre-create the Claude Code config dir owned by the container user, so the
 # named volume mounted here initializes writable (a bare mount point would be
 # root-owned and logins would fail to persist).

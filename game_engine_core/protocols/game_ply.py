@@ -1,5 +1,6 @@
 from typing import Protocol
 
+
 class GamePly(Protocol):
     """A single action taken by one player.
 

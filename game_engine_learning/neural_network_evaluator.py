@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from typing import Any
@@ -7,9 +8,9 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 
-from game_engine_core.protocols.game_position import GamePosition
-from game_engine_core.protocols.game_ply import GamePly
 from game_engine_core.models.position_evaluation import PositionEvaluation
+from game_engine_core.protocols.game_ply import GamePly
+from game_engine_core.protocols.game_position import GamePosition
 
 
 class NeuralNetworkEvaluator[TPly: GamePly, TPosition: GamePosition[Any]](ABC):

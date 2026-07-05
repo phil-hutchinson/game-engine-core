@@ -1,9 +1,10 @@
 from typing import Any
 
+from ..protocols.game_engine import GameEngine
 from ..protocols.game_ply import GamePly
 from ..protocols.game_position import GamePosition
-from ..protocols.game_engine import GameEngine
 from ..protocols.player import Player
+
 
 class AIPlayer[TPly: GamePly, TPosition: GamePosition[Any]](Player[TPly, TPosition]):
     def __init__(self, engine: GameEngine[TPly, TPosition], name: str, render_before_ply: bool = False):

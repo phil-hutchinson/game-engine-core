@@ -1,5 +1,6 @@
 from game_engine_core.protocols.game_ply import GamePly
 
+
 class TicTacToePly(GamePly):
     
     def __init__(self, square: int):

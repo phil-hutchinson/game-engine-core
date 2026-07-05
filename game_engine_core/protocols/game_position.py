@@ -1,8 +1,10 @@
 from __future__ import annotations
-from typing import Literal, Protocol, Self
+
 from collections.abc import Sequence
+from typing import Literal, Protocol, Self
 
 from .game_ply import GamePly
+
 
 class GamePosition[TGamePly: GamePly]  (Protocol):
     @property

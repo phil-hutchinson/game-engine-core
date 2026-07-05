@@ -1,12 +1,14 @@
 from __future__ import annotations
+
 from collections.abc import Callable
 from typing import Any
 
 from torch import Tensor
 
-from game_engine_core.protocols.game_position import GamePosition
-from game_engine_core.protocols.game_ply import GamePly
 from game_engine_core.engines.mcts_engine import MCTSEngine
+from game_engine_core.protocols.game_ply import GamePly
+from game_engine_core.protocols.game_position import GamePosition
+
 from .neural_network_evaluator import NeuralNetworkEvaluator
 from .training_sample import TrainingSample
 
