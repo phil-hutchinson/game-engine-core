@@ -16,9 +16,13 @@
     "containerEnv": {
         "CLAUDE_CONFIG_DIR": "/home/vscode/.claude"
     },
-    // Repair ownership on volumes created before the image pre-created the
-    // directory (Docker makes bare mount points root-owned).
-    "postCreateCommand": "sudo chown -R vscode:vscode /home/vscode/.claude",
+    // 1) Repair ownership on volumes created before the image pre-created the
+    //    directory (Docker makes bare mount points root-owned).
+    // 2) Install the project editable with the learning extra into the
+    //    container's Python — no .venv; the container is the isolation
+    //    boundary. Torch/numpy are already baked into the image, so this
+    //    only links the workspace source and is fast on every rebuild.
+    "postCreateCommand": "sudo chown -R vscode:vscode /home/vscode/.claude && pip install --editable '.[learning]'",
     "customizations": {
         "vscode": {
             "extensions": [
