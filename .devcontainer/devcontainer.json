@@ -15,7 +15,9 @@
     ],
     "containerEnv": {
         "CLAUDE_CONFIG_DIR": "/home/vscode/.claude",
-        "TZ": "America/Vancouver"
+        // Follow the host's timezone; falls back to UTC when the host doesn't
+        // export TZ. Personal defaults belong in user-level dotfiles.
+        "TZ": "${localEnv:TZ}"
     },
     // 1) Repair ownership on volumes created before the image pre-created the
     //    directory (Docker makes bare mount points root-owned).
@@ -30,7 +32,12 @@
                 "ms-python.python",
                 "ms-python.vscode-pylance",
                 "charliermarsh.ruff"
-            ]
+            ],
+            "settings": {
+                // Use the image's pinned ruff instead of the binary bundled
+                // with the extension, so the editor and `ruff check` agree.
+                "ruff.importStrategy": "fromEnvironment"
+            }
         }
     }
 }

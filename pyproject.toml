@@ -19,6 +19,9 @@ include = ["game_engine_core*", "game_engine_learning*"]
 [tool.pyright]
 # Scope to first-party code; keeps stray local dirs (e.g. an old .venv) out.
 include = ["game_engine_core", "game_engine_learning", "examples"]
+# Pin the target version: pyright otherwise infers it from the interpreter it
+# happens to find (it does not read requires-python).
+pythonVersion = "3.12"
 
 [tool.ruff.lint]
 # Ruff's defaults (pyflakes, pycodestyle errors) plus: UP and TID for the

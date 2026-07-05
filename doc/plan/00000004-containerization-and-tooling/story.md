@@ -31,7 +31,11 @@ Add CLI pyright with a `[tool.pyright]` configuration in `pyproject.toml`, runna
 
 Add ruff with a `[tool.ruff]` configuration in `pyproject.toml`, including the `TID` and `UP` rule groups that enforce the CONTRIBUTING.md conventions. The same in-story/follow-up split applies to any findings.
 
-### 4. Setup documentation rework
+### 4. Peer-review process update
+
+With pyright and ruff available as project tooling, the peer-review command (`.claude/commands/peer-review.md`) is updated to run both before reviewing and to file their findings as review comments.
+
+### 5. Setup documentation rework
 
 The README's venv-based Installation snippets describe contributor setup and are superseded by the container workflow. Rework the setup documentation into two audiences:
 

@@ -8,13 +8,14 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && rm -rf /var/lib/apt/lists/*
 
 # CLI pyright, baked into the image so the environment type-checks out of the
-# box. Unpinned: rebuilds track the current release, matching how the base
-# image and node runtime already float.
-RUN npm install -g pyright
+# box. Pinned so every rebuild produces the same diagnostics; bump the pin
+# deliberately in a commit of its own.
+RUN npm install -g pyright@1.1.411
 
-# CLI ruff, same rationale. The Ruff VS Code extension bundles its own binary;
-# this one serves the `ruff check` command line.
-RUN pip install --no-cache-dir ruff
+# CLI ruff, same rationale and pinning policy. The Ruff VS Code extension is
+# told to use this binary (ruff.importStrategy in devcontainer.json), so the
+# pin governs both the CLI and the editor.
+RUN pip install --no-cache-dir ruff==0.15.20
 
 # Pre-create the Claude Code config dir owned by the container user, so the
 # named volume mounted here initializes writable (a bare mount point would be

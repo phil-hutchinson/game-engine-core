@@ -39,3 +39,5 @@ from game_engine_core.protocols.game_ply import GamePly
 from game_engine_core.engines.mcts_engine import MCTSEngine
 from .tictactoe_ply import TicTacToePly  # sibling within the same example
 ```
+
+Ruff enforces these conventions only partially: it bans parent-relative imports in `examples/` (TID252), but no ruff rule can *require* relative imports, so the within-package convention relies on code review rather than tooling.
