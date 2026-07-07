@@ -21,6 +21,7 @@ from torch import Tensor
 from examples.tictactoe.tictactoe_ply import TicTacToePly
 from examples.tictactoe.tictactoe_position import TicTacToePosition
 from game_engine_core.engines.mcts_engine import MCTSEngine
+from game_engine_learning.checkpoints import checkpoint_path
 from game_engine_learning.self_play_collector import SelfPlayCollector
 from game_engine_learning.training_loop import TrainingLoop
 
@@ -55,7 +56,10 @@ def main(
     games_per_iteration: int = 25,
     epochs_per_iteration: int = 5,
     mcts_iterations: int = 200,
+    checkpoint_every: int | None = None,
 ) -> None:
+    if checkpoint_every is not None and checkpoint_every < 1:
+        raise ValueError(f"checkpoint_every must be >= 1, got {checkpoint_every}")
     model = TicTacToeMLP()
     evaluator = TicTacToeNNEvaluator(model=model)
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
@@ -91,6 +95,11 @@ def main(
             f"value {first.value:.4f} -> {last.value:.4f} | "
             f"policy {first.policy:.4f} -> {last.policy:.4f}"
         )
+        if checkpoint_every is not None and iteration % checkpoint_every == 0:
+            path = checkpoint_path(WEIGHTS_PATH.parent, iteration)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            torch.save(model.state_dict(), path)
+            print(f"Saved checkpoint to {path}")
 
     WEIGHTS_PATH.parent.mkdir(parents=True, exist_ok=True)
     torch.save(model.state_dict(), WEIGHTS_PATH)
@@ -103,10 +112,18 @@ if __name__ == "__main__":
     parser.add_argument("--games", type=int, default=25, help="Self-play games per iteration.")
     parser.add_argument("--epochs", type=int, default=5, help="Training epochs per iteration.")
     parser.add_argument("--mcts-iterations", type=int, default=200, help="MCTS iterations per ply during self-play.")
+    parser.add_argument(
+        "--checkpoint-every",
+        type=int,
+        default=None,
+        help="Save a weights checkpoint every N iterations (off by default). "
+        "Checkpoints can then be entered as players in tournament.py.",
+    )
     args = parser.parse_args()
     main(
         iterations=args.iterations,
         games_per_iteration=args.games,
         epochs_per_iteration=args.epochs,
         mcts_iterations=args.mcts_iterations,
+        checkpoint_every=args.checkpoint_every,
     )
