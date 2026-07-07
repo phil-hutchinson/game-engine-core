@@ -66,7 +66,7 @@ def test_player_two_win_reports_absolute_outcome_minus_1() -> None:
 def test_game_log_records_every_ply() -> None:
     result = _run_forced_line_game(pile=3)
     assert result.opening_board == "pile=3"
-    assert [entry for entry in result.game_log] == [
+    assert list(result.game_log) == [
         ("1", "pile=2"),
         ("1", "pile=1"),
         ("1", "pile=0"),

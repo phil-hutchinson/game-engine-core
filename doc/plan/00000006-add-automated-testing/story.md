@@ -39,3 +39,7 @@ A new story artifact, `automated-testing.md` (alongside this story's planning fi
 - **CI pipeline** — running the suite automatically on push/PR remains a future story (same status as pyright/ruff)
 - **Coverage tooling or thresholds** — `.gitignore` anticipates `.coverage`/`htmlcov/`, but measuring coverage is not part of this story
 - **Behavioural fixes** — general-cleanup findings #2 (root node never evaluated) and #3 (strict-alternation assumption) remain deferred to their own stories; tests written here assert *current* behaviour and use strictly alternating fixture games
+
+## After-completion notes
+
+- **`.gitignore` for `.claude/settings.local.json`** (commit `ee222d5`) — added mid-branch at the developer's explicit request. It is inert development tooling with no interaction with the testing work and was too small to warrant its own story, so it was folded into this branch. Recorded here (per peer-review comment #6) to keep the plan-to-commit audit trail complete.

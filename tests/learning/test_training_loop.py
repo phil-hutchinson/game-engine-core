@@ -90,7 +90,10 @@ def test_total_combines_value_and_weighted_policy_loss() -> None:
 
 def test_training_reduces_loss_on_fixed_targets() -> None:
     # With a real learning rate the loop must actually learn: repeated epochs
-    # over a fixed sample set should reduce the combined loss.
+    # over a fixed sample set should reduce the combined loss. Seed the weight
+    # init so the trajectory is fixed — reproducibility of an environment input,
+    # not the "seed and assert an exact sequence" pattern the conventions warn against.
+    torch.manual_seed(0)
     model = NimMLP()
     loop = TrainingLoop(
         model=model,

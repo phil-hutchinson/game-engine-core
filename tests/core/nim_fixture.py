@@ -42,6 +42,11 @@ class NimPosition(GamePosition[NimPly]):
         active_player_id: Literal[1, -1] = 1,
         takes: tuple[int, ...] = (1, 2),
     ):
+        # Require a take of 1 so no reachable non-empty pile can become a
+        # dead end (a position with no legal plies but ``outcome is None``),
+        # which the framework treats as impossible.
+        if 1 not in takes:
+            raise ValueError(f"takes must include 1 to avoid dead ends, got {takes}")
         self._pile = pile
         self._active_player_id: Literal[1, -1] = active_player_id
         self._takes = takes

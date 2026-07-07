@@ -11,9 +11,9 @@ from game_engine_core.evaluators.null_evaluator import NullEvaluator
 
 
 def test_engine_finds_the_win_in_one() -> None:
-    # P1 to move with 1, 2 on the top row (P2 on 4, 5): square 3 wins now, and
-    # every other ply loses to P2 completing the middle row, so the search
-    # signal is unambiguous.
+    # P1 to move with 1, 2 on the top row (P2 on 4, 5): square 3 wins
+    # immediately, while most alternatives let P2 play 6 and complete the middle
+    # row, so the search signal for square 3 is unambiguous.
     position = TicTacToePosition.new_game()
     for square in (1, 4, 2, 5):
         position = position.apply_ply(TicTacToePly(square))
