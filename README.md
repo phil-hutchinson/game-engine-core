@@ -45,6 +45,8 @@ See [`examples/tictactoe`](examples/tictactoe) for a complete working implementa
 
 The engine never touches game-specific logic. Everything game-specific lives behind the `GamePosition` and `PositionEvaluator` protocols.
 
+The examples ship with their own pytest suites ([`examples/tictactoe/tests`](examples/tictactoe/tests), [`examples/tictactoe_learning/tests`](examples/tictactoe_learning/tests)) that double as a model for testing your own game implementation — position legality and outcome checks, evaluator sanity tests, and an engine-vs-position integration test.
+
 ## MCTS and neural network support
 
 `MCTSEngine` uses PUCT selection (the same formula as AlphaZero). It accepts any `PositionEvaluator` implementation, so a neural network policy/value head can be dropped in without changing the search logic. The evaluator returns a `PositionEvaluation` with a scalar value (from the current player's perspective) and a policy dict mapping moves to prior probabilities.

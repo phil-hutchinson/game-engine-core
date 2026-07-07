@@ -17,6 +17,9 @@ RUN npm install -g pyright@1.1.411
 # pin governs both the CLI and the editor.
 RUN pip install --no-cache-dir ruff==0.15.20
 
+# pytest, same rationale and pinning policy.
+RUN pip install --no-cache-dir pytest==9.1.1
+
 # Pre-create the Claude Code config dir owned by the container user, so the
 # named volume mounted here initializes writable (a bare mount point would be
 # root-owned and logins would fail to persist).

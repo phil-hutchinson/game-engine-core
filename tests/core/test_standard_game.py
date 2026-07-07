@@ -1,0 +1,73 @@
+"""StandardGame game-flow tests, centred on the relative-to-absolute outcome conversion.
+
+The terminal position's outcome is current-player-relative; GameResult.outcome is
+absolute (1 = player 1 won). Forced-line Nim (takes of exactly 1) makes the winner a
+parity function of the starting pile, so both conversion directions can be asserted.
+"""
+
+from game_engine_core.game.standard_game import StandardGame
+from game_engine_core.models.game_result import GameResult
+
+from .nim_fixture import NimPly, NimPosition
+
+
+class NimStubUI:
+    """Minimal GameUI over the pile count; no human input in tests."""
+
+    def text_board(self, position: NimPosition) -> str:
+        return f"pile={position.pile}"
+
+    def render_board(self, position: NimPosition) -> None:
+        pass
+
+    def get_next_ply(self, position: NimPosition) -> NimPly:
+        raise NotImplementedError("Tests use scripted players only")
+
+
+class FirstLegalPlayer:
+    """Scripted Player: always takes the first legal ply."""
+
+    def __init__(self, name: str):
+        self._name = name
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    @property
+    def render_before_ply(self) -> bool:
+        return False
+
+    def select_ply(self, position: NimPosition) -> NimPly:
+        return position.legal_plies[0]
+
+
+def _run_forced_line_game(pile: int) -> GameResult:
+    game: StandardGame[NimPly, NimPosition] = StandardGame(
+        initial_position=NimPosition(pile=pile, takes=(1,)),
+        players={1: FirstLegalPlayer("P1"), -1: FirstLegalPlayer("P2")},
+        game_ui=NimStubUI(),
+    )
+    return game.run()
+
+
+def test_player_one_win_reports_absolute_outcome_1() -> None:
+    # Pile 3, one token per ply: P1, P2, P1 — player 1 takes the last token.
+    result = _run_forced_line_game(pile=3)
+    assert result.outcome == 1
+
+
+def test_player_two_win_reports_absolute_outcome_minus_1() -> None:
+    # Pile 4: P1, P2, P1, P2 — player 2 takes the last token.
+    result = _run_forced_line_game(pile=4)
+    assert result.outcome == -1
+
+
+def test_game_log_records_every_ply() -> None:
+    result = _run_forced_line_game(pile=3)
+    assert result.opening_board == "pile=3"
+    assert list(result.game_log) == [
+        ("1", "pile=2"),
+        ("1", "pile=1"),
+        ("1", "pile=0"),
+    ]
