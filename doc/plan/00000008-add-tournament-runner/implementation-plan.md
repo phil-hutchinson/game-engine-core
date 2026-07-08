@@ -63,3 +63,7 @@ Verification (manual): Read the resulting README diff (or confirmation that no c
 ## After completion
 
 Update this plan if any step's substance changed during implementation, and record each step's commit against it in the peer review when the story is reviewed.
+
+### Post-review changes
+
+Peer review finding #1 (stale checkpoints from earlier training runs mixing into tournaments) changed the substance of Steps 4–6: checkpoints now live in a timestamped run directory per training run (`weights/runs/<timestamp>/`) instead of the flat weights directory. Step 4's helpers gained `new_run_directory`/`latest_run_directory`; Step 5 creates a run directory lazily on the first checkpoint save; Step 6 reads the latest run by default with an optional `--checkpoints-dir` override.

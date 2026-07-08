@@ -21,15 +21,19 @@ from torch import Tensor
 from examples.tictactoe.tictactoe_ply import TicTacToePly
 from examples.tictactoe.tictactoe_position import TicTacToePosition
 from game_engine_core.engines.mcts_engine import MCTSEngine
-from game_engine_learning.checkpoints import checkpoint_path
+from game_engine_learning.checkpoints import checkpoint_path, new_run_directory
 from game_engine_learning.self_play_collector import SelfPlayCollector
 from game_engine_learning.training_loop import TrainingLoop
 
 from .tictactoe_mlp import TicTacToeMLP
 from .tictactoe_nn_evaluator import TicTacToeNNEvaluator
 
-# Derived artifact, not source — this directory is gitignored.
+# Derived artifacts, not source — the weights directory is gitignored.
+# model.pt is "the current model" (what main.py plays with); each checkpointed
+# training run gets its own timestamped folder under runs/ so re-training never
+# mixes checkpoints from different runs.
 WEIGHTS_PATH = Path(__file__).parent / "weights" / "model.pt"
+RUNS_DIR = WEIGHTS_PATH.parent / "runs"
 
 
 def tictactoe_policy_loss(
@@ -60,6 +64,7 @@ def main(
 ) -> None:
     if checkpoint_every is not None and checkpoint_every < 1:
         raise ValueError(f"checkpoint_every must be >= 1, got {checkpoint_every}")
+    run_dir: Path | None = None  # created lazily on the first checkpoint save
     model = TicTacToeMLP()
     evaluator = TicTacToeNNEvaluator(model=model)
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
@@ -96,8 +101,9 @@ def main(
             f"policy {first.policy:.4f} -> {last.policy:.4f}"
         )
         if checkpoint_every is not None and iteration % checkpoint_every == 0:
-            path = checkpoint_path(WEIGHTS_PATH.parent, iteration)
-            path.parent.mkdir(parents=True, exist_ok=True)
+            if run_dir is None:
+                run_dir = new_run_directory(RUNS_DIR)
+            path = checkpoint_path(run_dir, iteration)
             torch.save(model.state_dict(), path)
             print(f"Saved checkpoint to {path}")
 
@@ -116,8 +122,9 @@ if __name__ == "__main__":
         "--checkpoint-every",
         type=int,
         default=None,
-        help="Save a weights checkpoint every N iterations (off by default). "
-        "Checkpoints can then be entered as players in tournament.py.",
+        help="Save a weights checkpoint every N iterations (off by default) into a "
+        "timestamped run folder under weights/runs/. Checkpoints can then be "
+        "entered as players in tournament.py.",
     )
     args = parser.parse_args()
     main(

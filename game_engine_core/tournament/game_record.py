@@ -16,13 +16,17 @@ class GameRecord:
 
     result: GameResult
 
-    def points_for_side(self, side: Literal[1, -1]) -> float:
-        """Points earned by the given side: 1 for a win, 0.5 for a draw, 0 for a loss.
+    def relative_outcome_for_side(self, side: Literal[1, -1]) -> Literal[1, 0, -1]:
+        """The game from the given side's perspective: 1 won, 0 drew, -1 lost.
 
-        GameResult.outcome is absolute (1 means side 1 won), so a side scored a
-        win exactly when the outcome equals its side id. Keeping this sign logic
+        GameResult.outcome is absolute (1 means side 1 won), so a side won
+        exactly when the outcome equals its side id. Keeping this sign logic
         here means the aggregations never touch outcome conventions directly.
         """
         if self.result.outcome == 0:
-            return 0.5
-        return 1.0 if self.result.outcome == side else 0.0
+            return 0
+        return 1 if self.result.outcome == side else -1
+
+    def points_for_side(self, side: Literal[1, -1]) -> float:
+        """Points earned by the given side: 1 for a win, 0.5 for a draw, 0 for a loss."""
+        return (self.relative_outcome_for_side(side) + 1) / 2

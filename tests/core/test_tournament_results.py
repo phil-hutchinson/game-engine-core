@@ -31,6 +31,13 @@ def test_points_for_side_covers_win_draw_loss() -> None:
     assert draw.points_for_side(-1) == 0.5
 
 
+def test_relative_outcome_flips_with_the_side() -> None:
+    win_for_side_two = _record("A", "B", outcome=-1)
+    assert win_for_side_two.relative_outcome_for_side(-1) == 1
+    assert win_for_side_two.relative_outcome_for_side(1) == -1
+    assert _record("A", "B", outcome=0).relative_outcome_for_side(1) == 0
+
+
 def test_standings_tallies_across_sides() -> None:
     # A beats B once holding side 1, once holding side -1, and draws once.
     records = [

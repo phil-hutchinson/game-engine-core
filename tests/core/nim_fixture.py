@@ -81,3 +81,34 @@ class NimPosition(GamePosition[NimPly]):
             active_player_id=-self._active_player_id,
             takes=self._takes,
         )
+
+
+class NimStubUI:
+    """Minimal GameUI over the pile count; no human input in tests."""
+
+    def text_board(self, position: NimPosition) -> str:
+        return f"pile={position.pile}"
+
+    def render_board(self, position: NimPosition) -> None:
+        pass
+
+    def get_next_ply(self, position: NimPosition) -> NimPly:
+        raise NotImplementedError("Tests use scripted players only")
+
+
+class FirstLegalPlayer:
+    """Scripted Player: always takes the first legal ply."""
+
+    def __init__(self, name: str):
+        self._name = name
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    @property
+    def render_before_ply(self) -> bool:
+        return False
+
+    def select_ply(self, position: NimPosition) -> NimPly:
+        return position.legal_plies[0]

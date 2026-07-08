@@ -10,38 +10,14 @@ import pytest
 
 from game_engine_core.tournament.tournament import Tournament
 
-from .nim_fixture import NimPly, NimPosition
+from .nim_fixture import FirstLegalPlayer, NimPly, NimPosition, NimStubUI
 
 
-class NimStubUI:
-    """Minimal GameUI over the pile count; no human input in tests."""
-
-    def text_board(self, position: NimPosition) -> str:
-        return f"pile={position.pile}"
+class RenderForbiddenUI(NimStubUI):
+    """Tournament games are headless: any render call is a test failure."""
 
     def render_board(self, position: NimPosition) -> None:
         raise AssertionError("Tournament games are headless; nothing should render")
-
-    def get_next_ply(self, position: NimPosition) -> NimPly:
-        raise NotImplementedError("Tests use scripted players only")
-
-
-class FirstLegalPlayer:
-    """Scripted Player: always takes the first legal ply."""
-
-    def __init__(self, name: str):
-        self._name = name
-
-    @property
-    def name(self) -> str:
-        return self._name
-
-    @property
-    def render_before_ply(self) -> bool:
-        return False
-
-    def select_ply(self, position: NimPosition) -> NimPly:
-        return position.legal_plies[0]
 
 
 def _players(*names: str) -> list[FirstLegalPlayer]:
@@ -54,7 +30,7 @@ def _tournament(
     return Tournament(
         players=_players(*names),
         position_factory=lambda: NimPosition(pile=pile, takes=(1,)),
-        game_ui=NimStubUI(),
+        game_ui=RenderForbiddenUI(),
         games_per_pairing=games_per_pairing,
     )
 
@@ -110,7 +86,7 @@ def test_each_game_starts_from_a_fresh_position() -> None:
     Tournament(
         players=_players("A", "B", "C"),
         position_factory=counting_factory,
-        game_ui=NimStubUI(),
+        game_ui=RenderForbiddenUI(),
         games_per_pairing=2,
     ).run()
     assert calls == 6

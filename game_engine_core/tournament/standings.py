@@ -18,6 +18,15 @@ from .game_record import GameRecord
 _SIDES: tuple[Literal[1, -1], Literal[1, -1]] = (1, -1)
 
 
+@dataclass
+class _MutableTally:
+    """Accumulator behind compute_standings; StandingsEntry is the frozen result."""
+
+    wins: int = 0
+    draws: int = 0
+    losses: int = 0
+
+
 @dataclass(frozen=True)
 class StandingsEntry:
     player_name: str
@@ -46,22 +55,26 @@ def compute_standings(
     if len(set(player_names)) != len(player_names):
         raise ValueError(f"Duplicate player names in {player_names}")
 
-    tallies: dict[str, dict[float, int]] = {
-        name: {1.0: 0, 0.5: 0, 0.0: 0} for name in player_names
-    }
+    tallies = {name: _MutableTally() for name in player_names}
     for record in records:
         for side in _SIDES:
             name = record.players[side]
             if name not in tallies:
                 raise ValueError(f"Record names unknown player {name!r}")
-            tallies[name][record.points_for_side(side)] += 1
+            match record.relative_outcome_for_side(side):
+                case 1:
+                    tallies[name].wins += 1
+                case 0:
+                    tallies[name].draws += 1
+                case -1:
+                    tallies[name].losses += 1
 
     entries = [
         StandingsEntry(
             player_name=name,
-            wins=tally[1.0],
-            draws=tally[0.5],
-            losses=tally[0.0],
+            wins=tally.wins,
+            draws=tally.draws,
+            losses=tally.losses,
         )
         for name, tally in tallies.items()
     ]
