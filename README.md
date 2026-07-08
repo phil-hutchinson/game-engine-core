@@ -12,7 +12,8 @@ A game-agnostic Python engine framework for building board and turn-based games 
 | `game_engine_core.players` | `AIPlayer`, `HumanPlayer` |
 | `game_engine_core.evaluators` | `NullEvaluator` — uniform prior, used as a baseline |
 | `game_engine_core.models` | `GameResult`, `PositionEvaluation` (value + policy) |
-| `game_engine_learning` | Optional. `NeuralNetworkEvaluator` base class, self-play data collection, and training loop. Requires PyTorch. |
+| `game_engine_core.tournament` | `Tournament` — round-robin runner for any set of players, with standings/cross-table aggregation and report writing |
+| `game_engine_learning` | Optional. `NeuralNetworkEvaluator` base class, self-play data collection, training loop, and checkpoint file helpers. Requires PyTorch. |
 
 ## Quick start
 
@@ -52,6 +53,10 @@ The examples ship with their own pytest suites ([`examples/tictactoe/tests`](exa
 `MCTSEngine` uses PUCT selection (the same formula as AlphaZero). It accepts any `PositionEvaluator` implementation, so a neural network policy/value head can be dropped in without changing the search logic. The evaluator returns a `PositionEvaluation` with a scalar value (from the current player's perspective) and a policy dict mapping moves to prior probabilities.
 
 `game_engine_learning` provides self-play loops, training infrastructure, and a `NeuralNetworkEvaluator` base class. Subclass `NeuralNetworkEvaluator` and implement `encode_position` and `decode_policy` — the base class handles the forward pass and assembles the `PositionEvaluation`. See [`examples/tictactoe_learning`](examples/tictactoe_learning) for a complete example.
+
+## Tournaments
+
+`game_engine_core.tournament` plays a round-robin between any `Player` implementations (sides alternate within each pairing) and reports standings, a cross-table, and per-game JSON logs. Its main use is measuring training progress: save checkpoints during training (`train.py --checkpoint-every N` in the learning example), then enter each checkpoint as a player — the standings show whether later checkpoints actually beat earlier ones. See [`examples/tictactoe_learning/tournament.py`](examples/tictactoe_learning/tournament.py).
 
 ## Requirements
 
