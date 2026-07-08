@@ -29,3 +29,6 @@ Thumbs.db
 .local/
 
 examples/tictactoe_learning/weights/
+
+# Tournament reports are derived artifacts, like weights
+examples/tictactoe_learning/tournaments/
