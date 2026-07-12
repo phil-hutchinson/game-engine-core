@@ -91,10 +91,15 @@ class NimPosition(GamePosition[NimPly]):
 
 
 class NimStubUI:
-    """Minimal GameUI over the pile count; no human input in tests."""
+    """Minimal GameUI + GameLogging over the pile count; no human input in tests."""
 
     def text_board(self, position: NimPosition) -> str:
         return f"pile={position.pile}"
+
+    def ply_annotation(
+        self, from_position: NimPosition, ply: NimPly, to_position: NimPosition
+    ) -> str:
+        return str(ply)
 
     def render_board(self, position: NimPosition) -> None:
         pass

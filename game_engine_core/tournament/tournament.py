@@ -11,9 +11,9 @@ from itertools import combinations
 from typing import Any
 
 from ..game.standard_game import StandardGame
+from ..protocols.game_logging import GameLogging
 from ..protocols.game_ply import GamePly
 from ..protocols.game_position import GamePosition
-from ..protocols.game_ui import GameUI
 from ..protocols.player import Player
 from .cross_table import compute_cross_table
 from .game_record import GameRecord
@@ -34,7 +34,7 @@ class Tournament[TPly: GamePly, TPosition: GamePosition[Any]]:
         self,
         players: Sequence[Player[TPly, TPosition]],
         position_factory: Callable[[], TPosition],
-        game_ui: GameUI[TPly, TPosition],
+        game_ui: GameLogging[TPly, TPosition],
         games_per_pairing: int = 2,
     ):
         if len(players) < 2:
@@ -74,8 +74,8 @@ class Tournament[TPly: GamePly, TPosition: GamePosition[Any]]:
         game: StandardGame[TPly, TPosition] = StandardGame(
             initial_position=self._position_factory(),
             players={1: side_one, -1: side_other},
-            game_ui=self._game_ui,
-            render_final_board=False,
+            game_logging=self._game_ui,
+            game_ui=None,
         )
         return GameRecord(
             players={1: side_one.name, -1: side_other.name},

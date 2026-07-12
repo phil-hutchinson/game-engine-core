@@ -1,10 +1,15 @@
+from game_engine_core.protocols.game_logging import GameLogging
 from game_engine_core.protocols.game_ui import GameUI
 
 from .tictactoe_ply import TicTacToePly
 from .tictactoe_position import TicTacToePosition
 
 
-class TicTacToeUI(GameUI[TicTacToePly, TicTacToePosition]):
+class TicTacToeUI(
+    GameUI[TicTacToePly, TicTacToePosition],
+    GameLogging[TicTacToePly, TicTacToePosition],
+):
+    """Interactive UI and game logging on one class (the method sets don't collide)."""
 
     def render_board(self, position: TicTacToePosition) -> None:
         print(self.text_board(position))
@@ -25,6 +30,14 @@ class TicTacToeUI(GameUI[TicTacToePly, TicTacToePosition]):
             f"---+---+---\n"
             f" {b[6]} | {b[7]} | {b[8]} \n"
         )
+
+    def ply_annotation(
+        self,
+        from_position: TicTacToePosition,
+        ply: TicTacToePly,
+        to_position: TicTacToePosition,
+    ) -> str:
+        return str(ply)
 
     def get_next_ply(self, position: TicTacToePosition) -> TicTacToePly:
         player_symbol = 'X' if position.active_player_id == 1 else 'O'
