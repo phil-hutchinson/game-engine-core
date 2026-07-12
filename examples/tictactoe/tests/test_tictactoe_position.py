@@ -78,6 +78,18 @@ def test_win_reads_plus_one_when_the_active_player_holds_the_line() -> None:
 def test_ongoing_game_has_no_outcome() -> None:
     position = _play([1, 4, 2, 5])
     assert position.outcome is None
+    assert position.outcome_reason is None
+
+
+def test_win_reason_is_three_in_a_row() -> None:
+    position = _play([1, 4, 2, 5, 3])
+    assert position.outcome_reason == "Three in a row"
+
+
+def test_draw_reason_is_board_full() -> None:
+    position = _play([1, 3, 2, 4, 6, 5, 7, 8, 9])
+    assert position.outcome == 0
+    assert position.outcome_reason == "Board full"
 
 
 def test_full_board_without_a_line_is_a_draw() -> None:

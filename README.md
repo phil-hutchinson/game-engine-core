@@ -6,7 +6,7 @@ A game-agnostic Python engine framework for building board and turn-based games 
 
 | Package | Purpose |
 |---|---|
-| `game_engine_core.protocols` | Abstract interfaces: `GamePosition`, `GamePly`, `GameEngine`, `Player`, `PositionEvaluator`, `GameUI` |
+| `game_engine_core.protocols` | Abstract interfaces: `GamePosition`, `GamePly`, `GameEngine`, `Player`, `PositionEvaluator`, `GameUI`, `GameLogging` |
 | `game_engine_core.game` | `StandardGame` — the main game loop wiring players, engine, and UI together |
 | `game_engine_core.engines` | `MCTSEngine` (PUCT selection, configurable iterations), `RandomEngine` |
 | `game_engine_core.players` | `AIPlayer`, `HumanPlayer` |
@@ -30,7 +30,8 @@ game = StandardGame(
         1: AIPlayer(engine=engine, name="AI (X)"),
         -1: AIPlayer(engine=engine, name="AI (O)"),
     },
-    game_ui=MyGameUI(),
+    game_logging=MyGameLogging(),  # board snapshots + ply annotations for the game record
+    game_ui=MyGameUI(),  # interactive display; omit for headless play
 )
 result = game.run()
 ```
@@ -39,10 +40,11 @@ See [`examples/tictactoe`](examples/tictactoe) for a complete working implementa
 
 ## Implementing a game
 
-1. Subclass `GamePosition` — represent your board state and enumerate legal moves.
+1. Subclass `GamePosition` — represent your board state, enumerate legal moves, and report the outcome (with a reason) once the game ends.
 2. Subclass `GamePly` — represent a single move.
-3. Optionally subclass `PositionEvaluator` — plug in a heuristic or neural network to guide MCTS.
-4. Wire it together with `StandardGame`.
+3. Implement `GameLogging` — a text board rendering and a per-ply log annotation (`str(ply)` is a valid trivial annotation).
+4. Optionally subclass `PositionEvaluator` — plug in a heuristic or neural network to guide MCTS.
+5. Wire it together with `StandardGame`.
 
 The engine never touches game-specific logic. Everything game-specific lives behind the `GamePosition` and `PositionEvaluator` protocols.
 

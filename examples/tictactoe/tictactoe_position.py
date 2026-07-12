@@ -44,6 +44,15 @@ class TicTacToePosition(GamePosition[TicTacToePly]):
         return None
 
     @property
+    def outcome_reason(self) -> str | None:
+        outcome = self.outcome
+        if outcome is None:
+            return None
+        if outcome == 0:
+            return "Board full"
+        return "Three in a row"
+
+    @property
     def legal_plies(self) -> list[TicTacToePly]:
         return [
             TicTacToePly(i + 1)

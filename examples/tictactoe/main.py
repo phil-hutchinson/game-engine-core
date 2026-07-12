@@ -56,6 +56,7 @@ def main():
     game = StandardGame(
         initial_position=TicTacToePosition.new_game(),
         players={1: p1, -1: p2},
+        game_logging=ui,
         game_ui=ui,
     )
 

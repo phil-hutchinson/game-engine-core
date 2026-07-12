@@ -11,14 +11,20 @@ import pytest
 from game_engine_core.protocols.player import Player
 from game_engine_core.tournament.tournament import Tournament
 
-from .nim_fixture import FirstLegalPlayer, NimPly, NimPosition, NimStubUI
+from .nim_fixture import FirstLegalPlayer, NimPly, NimPosition
 
 
-class RenderForbiddenUI(NimStubUI):
-    """Tournament games are headless: any render call is a test failure."""
+class LoggingOnly:
+    """GameLogging with no UI members: tournaments are headless by construction,
+    so an object with nothing to render (or prompt with) must be sufficient."""
 
-    def render_board(self, position: NimPosition) -> None:
-        raise AssertionError("Tournament games are headless; nothing should render")
+    def text_board(self, position: NimPosition) -> str:
+        return f"pile={position.pile}"
+
+    def ply_annotation(
+        self, from_position: NimPosition, ply: NimPly, to_position: NimPosition
+    ) -> str:
+        return str(ply)
 
 
 def _players(*names: str) -> list[FirstLegalPlayer]:
@@ -31,7 +37,7 @@ def _tournament(
     return Tournament(
         players=_players(*names),
         position_factory=lambda p1, p2: NimPosition(pile=pile, takes=(1,)),
-        game_ui=RenderForbiddenUI(),
+        game_logging=LoggingOnly(),
         games_per_pairing=games_per_pairing,
     )
 
@@ -89,7 +95,7 @@ def test_each_game_starts_from_a_fresh_position() -> None:
     Tournament(
         players=_players("A", "B", "C"),
         position_factory=counting_factory,
-        game_ui=RenderForbiddenUI(),
+        game_logging=LoggingOnly(),
         games_per_pairing=2,
     ).run()
     assert calls == 6
@@ -110,7 +116,7 @@ def test_factory_receives_players_in_side_order() -> None:
     result = Tournament(
         players=_players("A", "B", "C"),
         position_factory=recording_factory,
-        game_ui=RenderForbiddenUI(),
+        game_logging=LoggingOnly(),
         games_per_pairing=2,
     ).run()
     assert len(received) == len(result.records) == 6  # called once per game

@@ -3,7 +3,7 @@
 The caller supplies the output folder — a fresh one per tournament (typically
 timestamped); reusing a folder is rejected so reports from different runs can
 never mix. This module never invents paths. Ply annotations are already
-strings (str(ply)), so game logs serialise to JSON directly.
+strings (GameLogging.ply_annotation), so game logs serialise to JSON directly.
 """
 
 from __future__ import annotations
@@ -92,6 +92,7 @@ def _game_json(record: GameRecord) -> dict[str, object]:
         "side_one": record.players[1],
         "side_two": record.players[-1],
         "outcome": record.result.outcome,
+        "result_reason": record.result.result_reason,
         "opening_board": record.result.opening_board,
         "plies": [
             {"ply": ply, "board": board} for ply, board in record.result.game_log

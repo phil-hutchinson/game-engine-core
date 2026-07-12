@@ -15,7 +15,7 @@ def _run_forced_line_game(pile: int) -> GameResult:
     game: StandardGame[NimPly, NimPosition] = StandardGame(
         initial_position=NimPosition(pile=pile, takes=(1,)),
         players={1: FirstLegalPlayer("P1"), -1: FirstLegalPlayer("P2")},
-        game_ui=NimStubUI(),
+        game_logging=NimStubUI(),
     )
     return game.run()
 
@@ -32,6 +32,11 @@ def test_player_two_win_reports_absolute_outcome_minus_1() -> None:
     assert result.outcome == -1
 
 
+def test_result_reason_comes_from_the_terminal_position() -> None:
+    result = _run_forced_line_game(pile=3)
+    assert result.result_reason == "Last token taken"
+
+
 def test_game_log_records_every_ply() -> None:
     result = _run_forced_line_game(pile=3)
     assert result.opening_board == "pile=3"
@@ -39,4 +44,26 @@ def test_game_log_records_every_ply() -> None:
         ("1", "pile=2"),
         ("1", "pile=1"),
         ("1", "pile=0"),
+    ]
+
+
+class ContextAnnotatingLogging(NimStubUI):
+    """ply_annotation distinguishable from str(ply), built from both positions."""
+
+    def ply_annotation(
+        self, from_position: NimPosition, ply: NimPly, to_position: NimPosition
+    ) -> str:
+        return f"take {ply.take}: {from_position.pile}->{to_position.pile}"
+
+
+def test_game_log_annotations_come_from_ply_annotation_not_str() -> None:
+    game: StandardGame[NimPly, NimPosition] = StandardGame(
+        initial_position=NimPosition(pile=2, takes=(1,)),
+        players={1: FirstLegalPlayer("P1"), -1: FirstLegalPlayer("P2")},
+        game_logging=ContextAnnotatingLogging(),
+    )
+    result = game.run()
+    assert [annotation for annotation, _ in result.game_log] == [
+        "take 1: 2->1",
+        "take 1: 1->0",
     ]

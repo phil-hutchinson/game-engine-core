@@ -17,7 +17,7 @@ from game_engine_core.tournament.standings import compute_standings
 def _record(side_one: str, side_two: str, outcome: Literal[1, 0, -1]) -> GameRecord:
     return GameRecord(
         players={1: side_one, -1: side_two},
-        result=GameResult(outcome=outcome, opening_board="", game_log=[]),
+        result=GameResult(outcome=outcome, result_reason="", opening_board="", game_log=[]),
     )
 
 

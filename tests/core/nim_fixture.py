@@ -68,6 +68,13 @@ class NimPosition(GamePosition[NimPly]):
         return None
 
     @property
+    def outcome_reason(self) -> str | None:
+        # Taking the last token is Nim's only way to end a game.
+        if self._pile == 0:
+            return "Last token taken"
+        return None
+
+    @property
     def legal_plies(self) -> list[NimPly]:
         return [NimPly(take) for take in self._takes if take <= self._pile]
 
@@ -84,10 +91,15 @@ class NimPosition(GamePosition[NimPly]):
 
 
 class NimStubUI:
-    """Minimal GameUI over the pile count; no human input in tests."""
+    """Minimal GameUI + GameLogging over the pile count; no human input in tests."""
 
     def text_board(self, position: NimPosition) -> str:
         return f"pile={position.pile}"
+
+    def ply_annotation(
+        self, from_position: NimPosition, ply: NimPly, to_position: NimPosition
+    ) -> str:
+        return str(ply)
 
     def render_board(self, position: NimPosition) -> None:
         pass
