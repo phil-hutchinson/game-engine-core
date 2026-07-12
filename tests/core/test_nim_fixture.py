@@ -8,6 +8,7 @@ from .nim_fixture import NimPly, NimPosition
 def test_nonempty_pile_is_ongoing() -> None:
     position = NimPosition(pile=5)
     assert position.outcome is None
+    assert position.outcome_reason is None
     assert position.active_player_id == 1
 
 
@@ -38,6 +39,7 @@ def test_taking_last_token_wins() -> None:
     terminal = NimPosition(pile=2).apply_ply(NimPly(2))
     assert terminal.pile == 0
     assert terminal.outcome == -1
+    assert terminal.outcome_reason == "Last token taken"
     assert terminal.legal_plies == []
 
 

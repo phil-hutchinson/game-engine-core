@@ -101,7 +101,7 @@ def main(
     tournament: Tournament[TicTacToePly, TicTacToePosition] = Tournament(
         players=players,
         position_factory=TicTacToePosition.new_game,
-        game_ui=TicTacToeUI(),
+        game_logging=TicTacToeUI(),
         games_per_pairing=games_per_pairing,
     )
     print(f"Running round-robin: {len(players)} players, {games_per_pairing} games per pairing...")

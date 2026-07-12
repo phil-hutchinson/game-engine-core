@@ -24,7 +24,7 @@ def result() -> TournamentResult:
     tournament: Tournament[NimPly, NimPosition] = Tournament(
         players=[FirstLegalPlayer(name) for name in ["A", "B", "C"]],
         position_factory=lambda: NimPosition(pile=3, takes=(1,)),
-        game_ui=NimStubUI(),
+        game_logging=NimStubUI(),
         games_per_pairing=2,
     )
     return tournament.run()
@@ -53,6 +53,7 @@ def test_one_parseable_json_per_game_matching_its_record(
         assert game["side_one"] == record.players[1]
         assert game["side_two"] == record.players[-1]
         assert game["outcome"] == record.result.outcome
+        assert game["result_reason"] == record.result.result_reason == "Last token taken"
         assert [(p["ply"], p["board"]) for p in game["plies"]] == list(
             record.result.game_log
         )
@@ -93,7 +94,7 @@ def test_player_names_are_escaped_in_markdown_tables() -> None:
     names = ["pipe|name", "line\nname"]
     record = GameRecord(
         players={1: names[0], -1: names[1]},
-        result=GameResult(outcome=1, opening_board="", game_log=[]),
+        result=GameResult(outcome=1, result_reason="", opening_board="", game_log=[]),
     )
     summary = render_summary(
         TournamentResult(
