@@ -100,7 +100,7 @@ def main(
 
     tournament: Tournament[TicTacToePly, TicTacToePosition] = Tournament(
         players=players,
-        position_factory=TicTacToePosition.new_game,
+        position_factory=lambda p1, p2: TicTacToePosition.new_game(),
         game_logging=TicTacToeUI(),
         games_per_pairing=games_per_pairing,
     )

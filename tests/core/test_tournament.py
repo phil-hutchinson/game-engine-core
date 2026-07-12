@@ -8,6 +8,7 @@ whichever player held each side — exactly checkable.
 
 import pytest
 
+from game_engine_core.protocols.player import Player
 from game_engine_core.tournament.tournament import Tournament
 
 from .nim_fixture import FirstLegalPlayer, NimPly, NimPosition
@@ -35,7 +36,7 @@ def _tournament(
 ) -> Tournament[NimPly, NimPosition]:
     return Tournament(
         players=_players(*names),
-        position_factory=lambda: NimPosition(pile=pile, takes=(1,)),
+        position_factory=lambda p1, p2: NimPosition(pile=pile, takes=(1,)),
         game_logging=LoggingOnly(),
         games_per_pairing=games_per_pairing,
     )
@@ -84,7 +85,9 @@ def test_side_two_wins_are_attributed_to_the_holder() -> None:
 def test_each_game_starts_from_a_fresh_position() -> None:
     calls = 0
 
-    def counting_factory() -> NimPosition:
+    def counting_factory(
+        side_one: Player[NimPly, NimPosition], side_other: Player[NimPly, NimPosition]
+    ) -> NimPosition:
         nonlocal calls
         calls += 1
         return NimPosition(pile=3, takes=(1,))
@@ -96,6 +99,32 @@ def test_each_game_starts_from_a_fresh_position() -> None:
         games_per_pairing=2,
     ).run()
     assert calls == 6
+
+
+def test_factory_receives_players_in_side_order() -> None:
+    # The pair passed to the factory must match the sides the GameRecord
+    # reports, so within-pairing alternation is observable through the
+    # factory's arguments.
+    received: list[tuple[str, str]] = []
+
+    def recording_factory(
+        side_one: Player[NimPly, NimPosition], side_other: Player[NimPly, NimPosition]
+    ) -> NimPosition:
+        received.append((side_one.name, side_other.name))
+        return NimPosition(pile=3, takes=(1,))
+
+    result = Tournament(
+        players=_players("A", "B", "C"),
+        position_factory=recording_factory,
+        game_logging=LoggingOnly(),
+        games_per_pairing=2,
+    ).run()
+    assert len(received) == len(result.records) == 6  # called once per game
+    assert received == [
+        (record.players[1], record.players[-1]) for record in result.records
+    ]
+    # Alternation flips the order the factory sees within each pairing.
+    assert ("A", "B") in received and ("B", "A") in received
 
 
 def test_rejects_duplicate_player_names() -> None:

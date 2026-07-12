@@ -58,7 +58,7 @@ The examples ship with their own pytest suites ([`examples/tictactoe/tests`](exa
 
 ## Tournaments
 
-`game_engine_core.tournament` plays a round-robin between any `Player` implementations (sides alternate within each pairing) and reports standings, a cross-table, and per-game JSON logs. Its main use is measuring training progress: save checkpoints during training (`train.py --checkpoint-every N` in the learning example), then enter each checkpoint as a player — the standings show whether later checkpoints actually beat earlier ones. See [`examples/tictactoe_learning/tournament.py`](examples/tictactoe_learning/tournament.py).
+`game_engine_core.tournament` plays a round-robin between any `Player` implementations (sides alternate within each pairing) and reports standings, a cross-table, and per-game JSON logs. Each game's starting position comes from a factory called with the two participants in side order, giving games whose opening position depends on per-player state a place to build it — factories that don't need the players just ignore the arguments. Its main use is measuring training progress: save checkpoints during training (`train.py --checkpoint-every N` in the learning example), then enter each checkpoint as a player — the standings show whether later checkpoints actually beat earlier ones. See [`examples/tictactoe_learning/tournament.py`](examples/tictactoe_learning/tournament.py).
 
 ## Requirements
 
