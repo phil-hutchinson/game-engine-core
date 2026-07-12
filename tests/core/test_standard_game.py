@@ -32,6 +32,11 @@ def test_player_two_win_reports_absolute_outcome_minus_1() -> None:
     assert result.outcome == -1
 
 
+def test_result_reason_comes_from_the_terminal_position() -> None:
+    result = _run_forced_line_game(pile=3)
+    assert result.result_reason == "Last token taken"
+
+
 def test_game_log_records_every_ply() -> None:
     result = _run_forced_line_game(pile=3)
     assert result.opening_board == "pile=3"

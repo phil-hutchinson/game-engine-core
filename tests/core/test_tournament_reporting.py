@@ -93,7 +93,7 @@ def test_player_names_are_escaped_in_markdown_tables() -> None:
     names = ["pipe|name", "line\nname"]
     record = GameRecord(
         players={1: names[0], -1: names[1]},
-        result=GameResult(outcome=1, opening_board="", game_log=[]),
+        result=GameResult(outcome=1, result_reason="", opening_board="", game_log=[]),
     )
     summary = render_summary(
         TournamentResult(

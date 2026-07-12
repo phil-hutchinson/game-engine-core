@@ -43,8 +43,12 @@ class StandardGame[TPly: GamePly, TPosition: GamePosition[Any]]:
         # position stores outcome relative to the player to move - change to non-relative value for output purposes
         # (the Literal annotation gives the checker the context to evaluate the product as literal math)
         absolute_outcome: Literal[1, 0, -1] = position.outcome * position.active_player_id
+        # The GamePosition contract guarantees a reason once outcome is non-None.
+        result_reason = position.outcome_reason
+        assert result_reason is not None
         return GameResult(
             outcome=absolute_outcome,
+            result_reason=result_reason,
             opening_board=opening_board,
             game_log=game_log,
         )
