@@ -13,7 +13,8 @@ class StandardGame[TPly: GamePly, TPosition: GamePosition[Any]]:
 
     game_logging feeds the game record (opening board, per-ply annotations and
     boards); game_ui is only for interactive board display — pass None for
-    headless play.
+    headless play. render_final_board (like render_before_ply) only applies
+    when a game_ui is supplied.
     """
 
     def __init__(
@@ -56,9 +57,9 @@ class StandardGame[TPly: GamePly, TPosition: GamePosition[Any]]:
         # position stores outcome relative to the player to move - change to non-relative value for output purposes
         # (the Literal annotation gives the checker the context to evaluate the product as literal math)
         absolute_outcome: Literal[1, 0, -1] = position.outcome * position.active_player_id
-        # The GamePosition contract guarantees a reason once outcome is non-None.
         result_reason = position.outcome_reason
-        assert result_reason is not None
+        if result_reason is None:
+            raise ValueError("GamePosition.outcome_reason must be non-None once outcome is set")
         return GameResult(
             outcome=absolute_outcome,
             result_reason=result_reason,

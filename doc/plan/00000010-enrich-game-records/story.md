@@ -36,7 +36,7 @@ Both are **breaking protocol changes, made without defaults or compatibility shi
 - `StandardGame` takes a required `GameLogging` (feeds `opening_board` and the game log) and an optional `game_ui: GameUI | None` used only for board rendering; headless play passes `None` instead of supplying a UI that is never shown.
 - `Tournament` takes a `GameLogging` instead of a `GameUI` and runs games with `game_ui=None`.
 - The game log keeps its `(ply annotation, board after ply)` shape; the annotation entry is now `ply_annotation(...)` instead of `str(ply)`. The identity contract on `GamePly.__str__` is untouched.
-- A game may implement `GameUI` and `GameLogging` on one class (structural protocols; the method sets don't collide) or on separate ones.
+- A game may implement `GameUI` and `GameLogging` on one class (the method sets don't collide) or on separate ones. Conformance may be structural or by explicit protocol inheritance.
 
 ### 3. In-repo implementers and tests
 

@@ -29,7 +29,7 @@ Introduce the `GameLogging` protocol (new module under `game_engine_core/protoco
 
 Because this is a breaking change with no shims, the same step updates every implementer and caller:
 
-- `TicTacToeUI` implements both protocols on one class (structural conformance; `ply_annotation` trivially returns the ply's string).
+- `TicTacToeUI` implements both protocols on one class, inheriting both protocol bases explicitly — matching its existing explicit `GameUI` subclassing (`ply_annotation` trivially returns the ply's string).
 - The Nim fixture's stub gains the `GameLogging` members (trivial annotation) alongside its existing UI members.
 - Both example entry points (`examples/tictactoe/main.py`, `examples/tictactoe_learning/main.py`) pass the UI object in both roles.
 - `Tournament._play_game` keeps compiling by passing its existing UI object as the logging argument with `game_ui=None` — its public constructor is untouched until Step 4.
