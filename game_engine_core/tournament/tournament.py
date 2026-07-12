@@ -26,15 +26,15 @@ class Tournament[TPly: GamePly, TPosition: GamePosition[Any]]:
 
     Side 1 (first to move) alternates within each pairing so first-move
     advantage cancels out — exactly with an even games_per_pairing, to within
-    one game with an odd one. Games run headless; the GameUI is only consulted
-    for text_board, which feeds the game logs.
+    one game with an odd one. Games run headless (no GameUI); the GameLogging
+    feeds the game logs.
     """
 
     def __init__(
         self,
         players: Sequence[Player[TPly, TPosition]],
         position_factory: Callable[[], TPosition],
-        game_ui: GameLogging[TPly, TPosition],
+        game_logging: GameLogging[TPly, TPosition],
         games_per_pairing: int = 2,
     ):
         if len(players) < 2:
@@ -46,7 +46,7 @@ class Tournament[TPly: GamePly, TPosition: GamePosition[Any]]:
             raise ValueError(f"games_per_pairing must be >= 1, got {games_per_pairing}")
         self._players = players
         self._position_factory = position_factory
-        self._game_ui = game_ui
+        self._game_logging = game_logging
         self._games_per_pairing = games_per_pairing
 
     def run(self) -> TournamentResult:
@@ -74,7 +74,7 @@ class Tournament[TPly: GamePly, TPosition: GamePosition[Any]]:
         game: StandardGame[TPly, TPosition] = StandardGame(
             initial_position=self._position_factory(),
             players={1: side_one, -1: side_other},
-            game_logging=self._game_ui,
+            game_logging=self._game_logging,
             game_ui=None,
         )
         return GameRecord(

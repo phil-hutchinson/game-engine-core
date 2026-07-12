@@ -24,7 +24,7 @@ def result() -> TournamentResult:
     tournament: Tournament[NimPly, NimPosition] = Tournament(
         players=[FirstLegalPlayer(name) for name in ["A", "B", "C"]],
         position_factory=lambda: NimPosition(pile=3, takes=(1,)),
-        game_ui=NimStubUI(),
+        game_logging=NimStubUI(),
         games_per_pairing=2,
     )
     return tournament.run()
