@@ -95,6 +95,32 @@ def test_each_game_starts_from_a_fresh_position() -> None:
     assert calls == 6
 
 
+def test_factory_receives_players_in_side_order() -> None:
+    # The pair passed to the factory must match the sides the GameRecord
+    # reports, so within-pairing alternation is observable through the
+    # factory's arguments.
+    received: list[tuple[str, str]] = []
+
+    def recording_factory(
+        side_one: Player[NimPly, NimPosition], side_other: Player[NimPly, NimPosition]
+    ) -> NimPosition:
+        received.append((side_one.name, side_other.name))
+        return NimPosition(pile=3, takes=(1,))
+
+    result = Tournament(
+        players=_players("A", "B", "C"),
+        position_factory=recording_factory,
+        game_ui=RenderForbiddenUI(),
+        games_per_pairing=2,
+    ).run()
+    assert len(received) == len(result.records) == 6  # called once per game
+    assert received == [
+        (record.players[1], record.players[-1]) for record in result.records
+    ]
+    # Alternation flips the order the factory sees within each pairing.
+    assert ("A", "B") in received and ("B", "A") in received
+
+
 def test_rejects_duplicate_player_names() -> None:
     with pytest.raises(ValueError, match="Duplicate"):
         _tournament(["A", "A"], pile=3, games_per_pairing=2)
