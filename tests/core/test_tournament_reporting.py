@@ -23,7 +23,7 @@ from .nim_fixture import FirstLegalPlayer, NimPly, NimPosition, NimStubUI
 def result() -> TournamentResult:
     tournament: Tournament[NimPly, NimPosition] = Tournament(
         players=[FirstLegalPlayer(name) for name in ["A", "B", "C"]],
-        position_factory=lambda: NimPosition(pile=3, takes=(1,)),
+        position_factory=lambda p1, p2: NimPosition(pile=3, takes=(1,)),
         game_ui=NimStubUI(),
         games_per_pairing=2,
     )

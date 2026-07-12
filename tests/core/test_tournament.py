@@ -8,6 +8,7 @@ whichever player held each side — exactly checkable.
 
 import pytest
 
+from game_engine_core.protocols.player import Player
 from game_engine_core.tournament.tournament import Tournament
 
 from .nim_fixture import FirstLegalPlayer, NimPly, NimPosition, NimStubUI
@@ -29,7 +30,7 @@ def _tournament(
 ) -> Tournament[NimPly, NimPosition]:
     return Tournament(
         players=_players(*names),
-        position_factory=lambda: NimPosition(pile=pile, takes=(1,)),
+        position_factory=lambda p1, p2: NimPosition(pile=pile, takes=(1,)),
         game_ui=RenderForbiddenUI(),
         games_per_pairing=games_per_pairing,
     )
@@ -78,7 +79,9 @@ def test_side_two_wins_are_attributed_to_the_holder() -> None:
 def test_each_game_starts_from_a_fresh_position() -> None:
     calls = 0
 
-    def counting_factory() -> NimPosition:
+    def counting_factory(
+        side_one: Player[NimPly, NimPosition], side_other: Player[NimPly, NimPosition]
+    ) -> NimPosition:
         nonlocal calls
         calls += 1
         return NimPosition(pile=3, takes=(1,))

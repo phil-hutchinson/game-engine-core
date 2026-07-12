@@ -28,12 +28,21 @@ class Tournament[TPly: GamePly, TPosition: GamePosition[Any]]:
     advantage cancels out — exactly with an even games_per_pairing, to within
     one game with an odd one. Games run headless; the GameUI is only consulted
     for text_board, which feeds the game logs.
+
+    position_factory is called once per game with the two participants in side
+    order — the first argument holds side 1 (first to move), the second side
+    -1 — with the within-pairing alternation already applied. This is the seam
+    for games whose starting position depends on per-player state (the factory
+    may downcast to its concrete player type); games that don't need it ignore
+    the arguments, e.g. ``lambda p1, p2: TicTacToePosition.new_game()``.
     """
 
     def __init__(
         self,
         players: Sequence[Player[TPly, TPosition]],
-        position_factory: Callable[[], TPosition],
+        position_factory: Callable[
+            [Player[TPly, TPosition], Player[TPly, TPosition]], TPosition
+        ],
         game_ui: GameUI[TPly, TPosition],
         games_per_pairing: int = 2,
     ):
@@ -72,7 +81,7 @@ class Tournament[TPly: GamePly, TPosition: GamePosition[Any]]:
         side_other: Player[TPly, TPosition],
     ) -> GameRecord:
         game: StandardGame[TPly, TPosition] = StandardGame(
-            initial_position=self._position_factory(),
+            initial_position=self._position_factory(side_one, side_other),
             players={1: side_one, -1: side_other},
             game_ui=self._game_ui,
             render_final_board=False,
