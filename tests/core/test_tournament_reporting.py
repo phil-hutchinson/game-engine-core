@@ -53,6 +53,7 @@ def test_one_parseable_json_per_game_matching_its_record(
         assert game["side_one"] == record.players[1]
         assert game["side_two"] == record.players[-1]
         assert game["outcome"] == record.result.outcome
+        assert game["result_reason"] == record.result.result_reason == "Last token taken"
         assert [(p["ply"], p["board"]) for p in game["plies"]] == list(
             record.result.game_log
         )
