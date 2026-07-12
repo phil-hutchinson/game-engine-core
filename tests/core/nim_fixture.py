@@ -68,6 +68,13 @@ class NimPosition(GamePosition[NimPly]):
         return None
 
     @property
+    def outcome_reason(self) -> str | None:
+        # Taking the last token is Nim's only way to end a game.
+        if self._pile == 0:
+            return "Last token taken"
+        return None
+
+    @property
     def legal_plies(self) -> list[NimPly]:
         return [NimPly(take) for take in self._takes if take <= self._pile]
 
