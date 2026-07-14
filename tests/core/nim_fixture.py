@@ -124,3 +124,9 @@ class FirstLegalPlayer:
 
     def select_ply(self, position: NimPosition) -> NimPly:
         return position.legal_plies[0]
+
+    def observe_ply(self, position: NimPosition, ply: NimPly, new_position: NimPosition) -> None:
+        pass
+
+    def reset(self) -> None:
+        pass
