@@ -36,6 +36,9 @@ class StandardGame[TPly: GamePly, TPosition: GamePosition[Any]]:
         opening_board = self._game_logging.text_board(position)
         game_log: list[tuple[str, str]] = []
 
+        self._players[-1].reset()
+        self._players[1].reset()
+
         while position.outcome is None:
             active_id = position.active_player_id
             player = self._players[active_id]
@@ -50,6 +53,9 @@ class StandardGame[TPly: GamePly, TPosition: GamePosition[Any]]:
                 self._game_logging.ply_annotation(from_position, ply, position),
                 self._game_logging.text_board(position),
             ))
+
+            self._players[-1].observe_ply(from_position, ply, position)
+            self._players[1].observe_ply(from_position, ply, position)
 
         if self._render_final_board and self._game_ui is not None:
             self._game_ui.render_board(position)

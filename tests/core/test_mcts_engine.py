@@ -30,7 +30,7 @@ def test_search_values_carry_correct_signs() -> None:
     # Inspects the tree via the private _build_tree: the per-node value signs are
     # the convention under test and are not observable through the public API.
     engine = _engine(iterations=100)
-    root = engine._build_tree(NimPosition(pile=2))  # pyright: ignore[reportPrivateUsage]
+    root = engine._create_root(NimPosition(pile=2))  # pyright: ignore[reportPrivateUsage]
 
     children = {str(child.ply_from_parent): child for child in root.children}
     assert set(children) == {"1", "2"}

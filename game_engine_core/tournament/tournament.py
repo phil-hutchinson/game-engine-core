@@ -62,6 +62,8 @@ class Tournament[TPly: GamePly, TPosition: GamePosition[Any]]:
         records: list[GameRecord] = []
         for first, second in combinations(self._players, 2):
             for game_index in range(self._games_per_pairing):
+                first.reset()
+                second.reset()
                 # Alternate who moves first within the pairing.
                 if game_index % 2 == 0:
                     records.append(self._play_game(first, second))

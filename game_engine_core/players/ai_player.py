@@ -22,3 +22,10 @@ class AIPlayer[TPly: GamePly, TPosition: GamePosition[Any]](Player[TPly, TPositi
         
     def select_ply(self, position: TPosition) -> TPly:
         return self._engine.select_ply(position)
+    
+    def observe_ply(self, position: TPosition, ply: TPly, new_position: TPosition) -> None:
+        self._engine.observe_ply(position, ply, new_position)
+
+    def reset(self) -> None:
+        self._engine.reset()
+
