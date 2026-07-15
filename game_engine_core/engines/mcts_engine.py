@@ -54,16 +54,41 @@ class MCTSNode[TPosition: GamePosition[Any], TPly: GamePly]:
 class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: PositionEvaluator[Any, Any]]:
     """Monte Carlo Tree Search engine."""
 
-    def __init__(self, evaluator: TEvaluator, iterations: int = 200000, verbose: bool = False, temperature: float = 0.0):
+    _root_node: MCTSNode[TPosition, TPly] | None
+
+    def __init__(self, evaluator: TEvaluator, iterations: int = 1_000, verbose: bool = False, temperature: float = 0.0):
         self.evaluator = evaluator
         self.iterations = iterations
         self.verbose = verbose
         self._temperature = temperature
+        self._root_node = None
 
     def select_ply(self, game_position: TPosition) -> TPly:
         """Select the best ply using MCTS."""
-        root = self._build_tree(game_position)
-        return self._choose_ply(root)
+        if self._root_node is None:
+            self._root_node = self._create_root(game_position)
+
+        self._grow_tree(self._root_node)
+
+        return self._choose_ply(self._root_node)
+
+    def observe_ply(self, position: TPosition, ply: TPly, new_position: TPosition) -> None:
+        """Update tree based on ply applied in-game"""
+        if self._root_node is None:
+            return
+
+        new_root = next((node for node in self._root_node.children if str(node.ply_from_parent) == str(ply)), None)
+        if new_root is None:
+            self._root_node = None
+            return
+
+        new_root.parent = None
+        new_root.ply_from_parent = None
+        self._root_node = new_root
+
+    def reset(self) -> None:
+        """A new game has started, clear state"""
+        self._root_node = None
 
     def select_ply_with_policy(self, game_position: TPosition) -> tuple[TPly, dict[str, float]]:
         """Select the best ply and return the MCTS visit distribution over all legal plies.
@@ -76,17 +101,21 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
             A tuple of (selected_ply, policy) where policy maps str(ply) to probability
             for every legal ply in the position.
         """
-        root = self._build_tree(game_position)
+        root = self._create_root(game_position)
+        self._grow_tree(root)
         return self._choose_ply(root), self._visit_distribution(root)
 
-    def _build_tree(self, game_position: TPosition) -> MCTSNode[TPosition, TPly]:
-        """Run all MCTS iterations from the given position and return the root node."""
+    def _create_root(self, game_position: TPosition) -> MCTSNode[TPosition, TPly]:
+        """Create a bare root node for the given position."""
         root: MCTSNode[TPosition, TPly] = MCTSNode(
             position=game_position, parent=None, ply_from_parent=None
         )
+        return root
+
+    def _grow_tree(self, root: MCTSNode[TPosition, TPly]) -> None:
+        """Run all MCTS iterations on the tree provided by root."""
         for _ in range(self.iterations):
             self._mcts_iteration(root)
-        return root
 
     def _choose_ply(self, root: MCTSNode[TPosition, TPly]) -> TPly:
         """Select a ply from the root's children according to the temperature setting."""

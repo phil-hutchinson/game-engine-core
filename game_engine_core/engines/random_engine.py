@@ -12,3 +12,9 @@ class RandomEngine[TGamePly: GamePly, TGamePosition: GamePosition[Any]]:
         if not plies:
             raise ValueError("No legal plies available")
         return random.choice(plies)
+
+    def observe_ply(self, position: TGamePosition, ply: TGamePly, new_position: TGamePosition) -> None:
+        pass
+
+    def reset(self) -> None:
+        pass

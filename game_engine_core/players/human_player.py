@@ -23,3 +23,9 @@ class HumanPlayer[TPly: GamePly, TPosition: GamePosition[Any]](Player[TPly, TPos
         
     def select_ply(self, position: TPosition) -> TPly:
         return self._game_ui.get_next_ply(position)
+    
+    def observe_ply(self, position: TPosition, ply: TPly, new_position: TPosition) -> None:
+        pass
+
+    def reset(self) -> None:
+        pass

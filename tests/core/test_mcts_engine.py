@@ -27,10 +27,11 @@ def test_forced_win_in_one_is_found() -> None:
 
 
 def test_search_values_carry_correct_signs() -> None:
-    # Inspects the tree via the private _build_tree: the per-node value signs are
+    # Inspects the tree via the private _create_root/_grow_tree: the per-node value signs are
     # the convention under test and are not observable through the public API.
     engine = _engine(iterations=100)
-    root = engine._build_tree(NimPosition(pile=2))  # pyright: ignore[reportPrivateUsage]
+    root = engine._create_root(NimPosition(pile=2))  # pyright: ignore[reportPrivateUsage]
+    engine._grow_tree(root)  # pyright: ignore[reportPrivateUsage]
 
     children = {str(child.ply_from_parent): child for child in root.children}
     assert set(children) == {"1", "2"}
@@ -152,3 +153,76 @@ def test_temperature_zero_picks_most_visited_ply() -> None:
 def test_temperature_sampling_returns_a_legal_ply() -> None:
     engine = _engine(iterations=50, temperature=1.0)
     assert engine.select_ply(NimPosition(pile=5)).take in {1, 2}
+
+
+def test_observe_ply_rerroots_onto_matching_child_preserving_subtree() -> None:
+    engine = _engine(iterations=50)
+    position = NimPosition(pile=5)
+    selected = engine.select_ply(position)
+    root = engine._root_node  # pyright: ignore[reportPrivateUsage]
+    assert root is not None
+    matching_child = next(
+        child for child in root.children if str(child.ply_from_parent) == str(selected)
+    )
+    expected_visits = matching_child.visits
+    expected_children = matching_child.children
+    assert expected_visits > 0  # otherwise this test can't tell retention from a reset
+
+    new_position = position.apply_ply(selected)
+    engine.observe_ply(position, selected, new_position)
+
+    new_root = engine._root_node  # pyright: ignore[reportPrivateUsage]
+    assert new_root is matching_child
+    assert new_root is not None
+    assert new_root.parent is None
+    assert new_root.ply_from_parent is None
+    assert new_root.visits == expected_visits
+    assert new_root.children is expected_children
+
+
+def test_observe_ply_miss_on_unexplored_child_clears_root_and_rebuilds() -> None:
+    # A single iteration expands exactly one root child, leaving the other legal
+    # ply unexplored.
+    engine = _engine(iterations=1)
+    position = NimPosition(pile=5)
+    engine.select_ply(position)
+    root = engine._root_node  # pyright: ignore[reportPrivateUsage]
+    assert root is not None
+    explored_takes = {child.ply_from_parent.take for child in root.children}  # type: ignore[union-attr]
+    assert len(explored_takes) == 1
+    unexplored_take = next(take for take in (1, 2) if take not in explored_takes)
+    unexplored_ply = NimPly(unexplored_take)
+    new_position = position.apply_ply(unexplored_ply)
+
+    engine.observe_ply(position, unexplored_ply, new_position)
+
+    assert engine._root_node is None  # pyright: ignore[reportPrivateUsage]
+    selected = engine.select_ply(new_position)
+    assert selected.take in {ply.take for ply in new_position.legal_plies}
+
+
+def test_observe_ply_before_any_search_leaves_root_none_and_rebuilds() -> None:
+    engine = _engine(iterations=10)
+    position = NimPosition(pile=5)
+    ply = NimPly(1)
+    new_position = position.apply_ply(ply)
+
+    engine.observe_ply(position, ply, new_position)
+
+    assert engine._root_node is None  # pyright: ignore[reportPrivateUsage]
+    selected = engine.select_ply(new_position)
+    assert selected.take in {p.take for p in new_position.legal_plies}
+
+
+def test_reset_clears_the_root_for_a_cold_start() -> None:
+    engine = _engine(iterations=20)
+    engine.select_ply(NimPosition(pile=5))
+    assert engine._root_node is not None  # pyright: ignore[reportPrivateUsage]
+
+    engine.reset()
+
+    assert engine._root_node is None  # pyright: ignore[reportPrivateUsage]
+    engine.select_ply(NimPosition(pile=3))
+    root = engine._root_node  # pyright: ignore[reportPrivateUsage]
+    assert root is not None
+    assert root.position.pile == 3

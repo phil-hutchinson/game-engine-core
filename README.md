@@ -8,7 +8,7 @@ A game-agnostic Python engine framework for building board and turn-based games 
 |---|---|
 | `game_engine_core.protocols` | Abstract interfaces: `GamePosition`, `GamePly`, `GameEngine`, `Player`, `PositionEvaluator`, `GameUI`, `GameLogging` |
 | `game_engine_core.game` | `StandardGame` — the main game loop wiring players, engine, and UI together |
-| `game_engine_core.engines` | `MCTSEngine` (PUCT selection, configurable iterations), `RandomEngine` |
+| `game_engine_core.engines` | `MCTSEngine` (PUCT selection, configurable iterations, retains its search tree across plies), `RandomEngine` |
 | `game_engine_core.players` | `AIPlayer`, `HumanPlayer` |
 | `game_engine_core.evaluators` | `NullEvaluator` — uniform prior, used as a baseline |
 | `game_engine_core.models` | `GameResult`, `PositionEvaluation` (value + policy) |
@@ -53,6 +53,8 @@ The examples ship with their own pytest suites ([`examples/tictactoe/tests`](exa
 ## MCTS and neural network support
 
 `MCTSEngine` uses PUCT selection (the same formula as AlphaZero). It accepts any `PositionEvaluator` implementation, so a neural network policy/value head can be dropped in without changing the search logic. The evaluator returns a `PositionEvaluation` with a scalar value (from the current player's perspective) and a policy dict mapping moves to prior probabilities.
+
+Within a game, `MCTSEngine` retains its search tree between plies: `StandardGame` reports every applied ply back to the engine via `observe_ply`, and the engine re-roots onto the corresponding child instead of rebuilding from scratch, carrying forward visit counts, cached evaluations, and priors. This is most valuable with a neural network evaluator, where re-evaluating positions is the dominant cost. Retention is per-game — `StandardGame` resets it at the start of each game, so reusing a player/engine across games (as `Tournament` does) never leaks a tree between games. `select_ply_with_policy`, the self-play data-collection path, always builds a fresh tree and is unaffected.
 
 `game_engine_learning` provides self-play loops, training infrastructure, and a `NeuralNetworkEvaluator` base class. Subclass `NeuralNetworkEvaluator` and implement `encode_position` and `decode_policy` — the base class handles the forward pass and assembles the `PositionEvaluation`. See [`examples/tictactoe_learning`](examples/tictactoe_learning) for a complete example.
 

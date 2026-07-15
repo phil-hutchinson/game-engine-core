@@ -5,8 +5,14 @@ absolute (1 = player 1 won). Forced-line Nim (takes of exactly 1) makes the winn
 parity function of the starting pile, so both conversion directions can be asserted.
 """
 
+from typing import Literal
+
+from game_engine_core.engines.mcts_engine import MCTSEngine
+from game_engine_core.evaluators.null_evaluator import NullEvaluator
 from game_engine_core.game.standard_game import StandardGame
 from game_engine_core.models.game_result import GameResult
+from game_engine_core.players.ai_player import AIPlayer
+from game_engine_core.protocols.player import Player
 
 from .nim_fixture import FirstLegalPlayer, NimPly, NimPosition, NimStubUI
 
@@ -67,3 +73,35 @@ def test_game_log_annotations_come_from_ply_annotation_not_str() -> None:
         "take 1: 2->1",
         "take 1: 1->0",
     ]
+
+
+def test_reused_engine_players_stay_isolated_across_games() -> None:
+    # As a tournament does, the same AIPlayer/engine instances play a second
+    # game. Without StandardGame.run resetting the engines, the retained tree
+    # from game one's terminal (pile=0) position would still be the root going
+    # into game two's pile=5 opening, and select_ply would hand back a ply
+    # that's illegal for the real position - raising here instead of playing on.
+    engine_one: MCTSEngine[NimPly, NimPosition, NullEvaluator[NimPly, NimPosition]] = MCTSEngine(
+        evaluator=NullEvaluator(), iterations=20
+    )
+    engine_two: MCTSEngine[NimPly, NimPosition, NullEvaluator[NimPly, NimPosition]] = MCTSEngine(
+        evaluator=NullEvaluator(), iterations=20
+    )
+    players: dict[Literal[1, -1], Player[NimPly, NimPosition]] = {
+        1: AIPlayer(engine_one, "P1"),
+        -1: AIPlayer(engine_two, "P2"),
+    }
+
+    def _run_game() -> GameResult:
+        game: StandardGame[NimPly, NimPosition] = StandardGame(
+            initial_position=NimPosition(pile=5),
+            players=players,
+            game_logging=NimStubUI(),
+        )
+        return game.run()
+
+    first_result = _run_game()
+    second_result = _run_game()
+
+    assert first_result.outcome in (1, -1)
+    assert second_result.outcome in (1, -1)

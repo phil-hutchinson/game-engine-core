@@ -18,3 +18,12 @@ class Player[TPly: GamePly, TPosition: GamePosition[Any]](Protocol):
     def select_ply(self, position: TPosition) -> TPly:
         """Select the next ply given the current position."""
         ...
+
+    def observe_ply(self, position: TPosition, ply: TPly, new_position: TPosition) -> None:
+        """Notifies that a ply has been applied to the position: for engines that retain state """
+        ...
+
+    def reset(self) -> None:
+        """Notifies that a new game has started and state can be reset"""
+        ...
+
