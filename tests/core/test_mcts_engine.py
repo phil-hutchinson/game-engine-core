@@ -27,7 +27,7 @@ def test_forced_win_in_one_is_found() -> None:
 
 
 def test_search_values_carry_correct_signs() -> None:
-    # Inspects the tree via the private _build_tree: the per-node value signs are
+    # Inspects the tree via the private _create_root/_grow_tree: the per-node value signs are
     # the convention under test and are not observable through the public API.
     engine = _engine(iterations=100)
     root = engine._create_root(NimPosition(pile=2))  # pyright: ignore[reportPrivateUsage]

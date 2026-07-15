@@ -76,12 +76,12 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
         """Update tree based on ply applied in-game"""
         if self._root_node is None:
             return
-        
+
         new_root = next((node for node in self._root_node.children if str(node.ply_from_parent) == str(ply)), None)
         if new_root is None:
             self._root_node = None
             return
-        
+
         new_root.parent = None
         new_root.ply_from_parent = None
         self._root_node = new_root
