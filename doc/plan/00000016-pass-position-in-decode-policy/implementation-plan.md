@@ -41,13 +41,17 @@ confirm the widened type is consistent at every call site.
 
 ### Step 2 — Test coverage that decode_policy receives the position itself
 
-Add or adjust a test (in `examples/tictactoe_learning/tests/test_nn_evaluator.py`,
+Add a test (in `examples/tictactoe_learning/tests/test_nn_evaluator.py`,
 alongside the existing `decode_policy` tests) that would fail if
-`evaluate_position` still passed only a derived list: pass a `TicTacToePosition`
-into `decode_policy` and assert the implementation can read a property that
-only exists on the position itself (e.g. `active_player_id`), not just iterate
-`legal_plies`. This pins that the parameter is genuinely the position, not a
-sequence that happens to look similar.
+`evaluate_position` still passed only a derived list. A direct call to
+`decode_policy` can't distinguish this — the new signature accepts a
+`TicTacToePosition` either way — so the test instead exercises the production
+`evaluate_position` → `decode_policy` wiring: a `_RecordingEvaluator` test
+double subclasses `TicTacToeNNEvaluator`, overrides `decode_policy` to record
+the object it receives (delegating to `super()` so real behaviour is still
+exercised), and the test calls `evaluate_position` on it and asserts the
+recorded object exposes `active_player_id` — a property that only exists on
+the position itself, not on a bare `legal_plies` sequence.
 
 Depends on: Step 1 (the new signature is what this test exercises).
 

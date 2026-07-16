@@ -1,0 +1,14 @@
+# Peer Review — pass-position-in-decode-policy
+
+## Summary
+
+`decode_policy` was widened from `(policy_logits, legal_plies: Sequence[TPly])` to `(policy_logits, position: TPosition)` across `NeuralNetworkEvaluator`, both in-repo implementations (`TicTacToeNNEvaluator`, `NimNNEvaluator`), and their tests, with the now-unused `TPly` type parameter dropped from `NeuralNetworkEvaluator` and `self_play_collector.py`'s annotation updated to match. A new test pins that `evaluate_position` forwards the real position object (not a derived list) to `decode_policy`. `pyright` and `ruff check .` both report clean (0 errors/warnings), and the full suite passes (111 passed).
+
+## Comments
+
+### Minor
+
+| # | Status | Resolution | Location | Comment | Suggested Change | Code Snippet |
+|---|--------|------------|----------|---------|-----------------|--------------|
+| 1 | Closed | Fixed — added an Addendum section to `story.md` documenting the `TPly` removal and its ripple. | [../../../game_engine_learning/neural_network_evaluator.py#L14](../../../game_engine_learning/neural_network_evaluator.py#L14) | Neither `story.md` nor `implementation-plan.md` mentions dropping the `TPly` type parameter from `NeuralNetworkEvaluator` (and the resulting ripple into `TicTacToeNNEvaluator`, `NimNNEvaluator`, and `self_play_collector.py`'s `evaluator` annotation). The change itself is correct and justified — `TPly` became unused once `decode_policy` stopped taking `legal_plies` directly, and pyright flagged it — but it's an undocumented deviation from the plan's stated scope. | Add a line to `story.md`'s Scope section (or a note in `implementation-plan.md` Step 1) recording that the now-dead `TPly` parameter was removed along with the signature widening, so the plan/story reflect what was actually shipped. | `class NeuralNetworkEvaluator[TPosition: GamePosition[Any]](ABC):` |
+| 2 | Closed | Fixed — rewrote Step 2 of `implementation-plan.md` to describe the `_RecordingEvaluator` approach actually used. | [../../../examples/tictactoe_learning/tests/test_nn_evaluator.py#L26-L39](../../../examples/tictactoe_learning/tests/test_nn_evaluator.py#L26-L39) | Step 2 of the implementation plan describes the new coverage as passing a `TicTacToePosition` directly into `decode_policy` and reading a position-only property off it. What was implemented instead is a `_RecordingEvaluator` test double that captures the argument `evaluate_position` forwards to `decode_policy`. This is arguably a stronger test (it exercises the production `evaluate_position` → `decode_policy` wiring rather than a direct call, which would trivially pass under the new signature regardless of whether the wiring was fixed) but it's a different mechanism than the plan describes. | Update `implementation-plan.md` Step 2 to describe the recording-subclass approach actually used, so the plan matches the shipped test. | `class _RecordingEvaluator(TicTacToeNNEvaluator):` |

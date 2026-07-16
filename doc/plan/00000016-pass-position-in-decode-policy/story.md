@@ -62,3 +62,14 @@ signature change.
   plies.
 - No changes to `PositionEvaluation`, `TrainingLoop`, or `SelfPlayCollector`,
   none of which call `decode_policy` directly.
+
+## Addendum
+
+Once `decode_policy` no longer took `legal_plies: Sequence[TPly]`, the `TPly`
+type parameter on `NeuralNetworkEvaluator` had no remaining use — pyright
+flagged it as dead — so it was dropped as part of the same change, narrowing
+`NeuralNetworkEvaluator[TPly, TPosition]` to `NeuralNetworkEvaluator[TPosition]`.
+This rippled into `TicTacToeNNEvaluator`, `NimNNEvaluator` (both now
+parameterized on `TPosition` alone), and `self_play_collector.py`'s `evaluator`
+annotation (`NeuralNetworkEvaluator[TPosition]`); `SelfPlayCollector` itself
+keeps its own `TPly` parameter, since it still needs it for `MCTSEngine`.
