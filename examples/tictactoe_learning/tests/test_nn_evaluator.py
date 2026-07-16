@@ -60,7 +60,7 @@ def test_decode_policy_is_a_distribution_over_exactly_the_legal_plies() -> None:
     position = TicTacToePosition(_mid_game_board(), active_player_id=1)
     legal_plies = position.legal_plies
 
-    policy = evaluator.decode_policy(torch.zeros(9), legal_plies)
+    policy = evaluator.decode_policy(torch.zeros(9), position)
 
     assert set(policy) == {str(ply) for ply in legal_plies}
     assert all(probability > 0 for probability in policy.values())
@@ -75,7 +75,7 @@ def test_decode_policy_reflects_the_logit_ordering() -> None:
     logits = torch.zeros(9)
     logits[2] = 5.0  # square 3, a legal empty square
 
-    policy = evaluator.decode_policy(logits, position.legal_plies)
+    policy = evaluator.decode_policy(logits, position)
 
     assert max(policy, key=lambda key: policy[key]) == "3"
 
@@ -87,10 +87,10 @@ def test_decode_policy_ignores_logits_on_illegal_squares() -> None:
     position = TicTacToePosition(_mid_game_board(), active_player_id=1)
     legal_plies = position.legal_plies
 
-    baseline = evaluator.decode_policy(torch.zeros(9), legal_plies)
+    baseline = evaluator.decode_policy(torch.zeros(9), position)
     spiked = torch.zeros(9)
     spiked[0] = 100.0  # square 1 is occupied and must be masked out
-    with_illegal_spike = evaluator.decode_policy(spiked, legal_plies)
+    with_illegal_spike = evaluator.decode_policy(spiked, position)
 
     assert "1" not in with_illegal_spike
     for ply in legal_plies:

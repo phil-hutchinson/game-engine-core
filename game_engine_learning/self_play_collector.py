@@ -28,7 +28,7 @@ class SelfPlayCollector[TPly: GamePly, TPosition: GamePosition[Any]]:
 
     def __init__(
         self,
-        evaluator: NeuralNetworkEvaluator[TPly, TPosition],
+        evaluator: NeuralNetworkEvaluator[TPosition],
         engine_factory: Callable[[], MCTSEngine[TPly, TPosition, Any]],
         position_factory: Callable[[], TPosition],
     ):

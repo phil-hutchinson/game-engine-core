@@ -14,7 +14,7 @@ import torch.nn.functional as F
 from torch import Tensor
 
 from game_engine_learning.neural_network_evaluator import NeuralNetworkEvaluator
-from tests.core.nim_fixture import NimPly, NimPosition
+from tests.core.nim_fixture import NimPosition
 
 
 class NimMLP(nn.Module):
@@ -41,14 +41,16 @@ class NimMLP(nn.Module):
         return value, policy_logits
 
 
-class NimNNEvaluator(NeuralNetworkEvaluator[NimPly, NimPosition]):
+class NimNNEvaluator(NeuralNetworkEvaluator[NimPosition]):
 
     def encode_position(self, position: NimPosition) -> Tensor:
         return torch.tensor([float(position.pile)], dtype=torch.float32)
 
     def decode_policy(
-        self, policy_logits: Tensor, legal_plies: Sequence[NimPly]
+        self, policy_logits: Tensor, position: NimPosition
     ) -> dict[str, float]:
+        legal_plies = position.legal_plies
+
         # Mask to the legal columns, then softmax so probabilities sum to 1.
         legal_logits = policy_logits[[ply.take - 1 for ply in legal_plies]]
         probs = torch.softmax(legal_logits, dim=-1)
