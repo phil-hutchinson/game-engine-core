@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Sequence
 from typing import Any
 
 import torch
@@ -9,11 +8,10 @@ import torch.nn as nn
 from torch import Tensor
 
 from game_engine_core.models.position_evaluation import PositionEvaluation
-from game_engine_core.protocols.game_ply import GamePly
 from game_engine_core.protocols.game_position import GamePosition
 
 
-class NeuralNetworkEvaluator[TPly: GamePly, TPosition: GamePosition[Any]](ABC):
+class NeuralNetworkEvaluator[TPosition: GamePosition[Any]](ABC):
     """Abstract base class wrapping a PyTorch model as a PositionEvaluator.
 
     Subclasses implement encode_position and decode_policy; this class handles
@@ -51,7 +49,7 @@ class NeuralNetworkEvaluator[TPly: GamePly, TPosition: GamePosition[Any]](ABC):
         ...
 
     @abstractmethod
-    def decode_policy(self, policy_logits: Tensor, legal_plies: Sequence[TPly]) -> dict[str, float]:
+    def decode_policy(self, policy_logits: Tensor, position: TPosition) -> dict[str, float]:
         """Convert raw policy logits into a probability distribution over legal moves.
 
         Implementations should mask illegal moves (typically by adding -inf to their
@@ -61,7 +59,11 @@ class NeuralNetworkEvaluator[TPly: GamePly, TPosition: GamePosition[Any]](ABC):
         Args:
             policy_logits: Raw unbounded output from the model's policy head —
                 one value per possible move in the game's full action space.
-            legal_plies: The moves that are actually legal in the current position.
+            position: The position the logits were computed for. Implementations
+                that only need the legal moves read position.legal_plies; the
+                full position is available for anything else a decoding scheme
+                needs (e.g. position.active_player_id, to interpret logits laid
+                out from the active player's perspective).
 
         Returns:
             A dict mapping str(ply) to probability for each legal ply.
@@ -91,6 +93,6 @@ class NeuralNetworkEvaluator[TPly: GamePly, TPosition: GamePosition[Any]](ABC):
         # Convert raw logits to a masked probability distribution over legal moves.
         # squeeze(0) drops the batch dimension so decode_policy receives logits for
         # a single position, matching the unbatched shape encode_position produces.
-        policy = self.decode_policy(policy_logits.squeeze(0), list(position.legal_plies))
+        policy = self.decode_policy(policy_logits.squeeze(0), position)
 
         return PositionEvaluation(value=value, policy=policy)

@@ -10,6 +10,7 @@ from typing import cast
 
 import pytest
 import torch
+from torch import Tensor
 
 from examples.tictactoe.tictactoe_position import Board, TicTacToePosition
 from examples.tictactoe_learning.tictactoe_mlp import TicTacToeMLP
@@ -20,6 +21,22 @@ def _evaluator() -> TicTacToeNNEvaluator:
     # encode_position/decode_policy never touch the model, so any model instance
     # serves; these tests deliberately exercise only the sign-convention logic.
     return TicTacToeNNEvaluator(model=TicTacToeMLP())
+
+
+class _RecordingEvaluator(TicTacToeNNEvaluator):
+    """Records the object evaluate_position hands to decode_policy.
+
+    Delegates to the real decode_policy so the recorded object's behaviour
+    (not just its identity) still gets exercised.
+    """
+
+    def __init__(self, model: TicTacToeMLP):
+        super().__init__(model=model)
+        self.received_position: TicTacToePosition | None = None
+
+    def decode_policy(self, policy_logits: Tensor, position: TicTacToePosition) -> dict[str, float]:
+        self.received_position = position
+        return super().decode_policy(policy_logits, position)
 
 
 def _mid_game_board() -> Board:
@@ -60,7 +77,7 @@ def test_decode_policy_is_a_distribution_over_exactly_the_legal_plies() -> None:
     position = TicTacToePosition(_mid_game_board(), active_player_id=1)
     legal_plies = position.legal_plies
 
-    policy = evaluator.decode_policy(torch.zeros(9), legal_plies)
+    policy = evaluator.decode_policy(torch.zeros(9), position)
 
     assert set(policy) == {str(ply) for ply in legal_plies}
     assert all(probability > 0 for probability in policy.values())
@@ -75,7 +92,7 @@ def test_decode_policy_reflects_the_logit_ordering() -> None:
     logits = torch.zeros(9)
     logits[2] = 5.0  # square 3, a legal empty square
 
-    policy = evaluator.decode_policy(logits, position.legal_plies)
+    policy = evaluator.decode_policy(logits, position)
 
     assert max(policy, key=lambda key: policy[key]) == "3"
 
@@ -87,11 +104,26 @@ def test_decode_policy_ignores_logits_on_illegal_squares() -> None:
     position = TicTacToePosition(_mid_game_board(), active_player_id=1)
     legal_plies = position.legal_plies
 
-    baseline = evaluator.decode_policy(torch.zeros(9), legal_plies)
+    baseline = evaluator.decode_policy(torch.zeros(9), position)
     spiked = torch.zeros(9)
     spiked[0] = 100.0  # square 1 is occupied and must be masked out
-    with_illegal_spike = evaluator.decode_policy(spiked, legal_plies)
+    with_illegal_spike = evaluator.decode_policy(spiked, position)
 
     assert "1" not in with_illegal_spike
     for ply in legal_plies:
         assert with_illegal_spike[str(ply)] == pytest.approx(baseline[str(ply)])
+
+
+def test_evaluate_position_passes_the_position_itself_to_decode_policy() -> None:
+    # decode_policy must receive the position, not merely a sequence of legal
+    # plies derived from it: read active_player_id, a property that only
+    # exists on the position, to confirm the real object reaches decode_policy
+    # through evaluate_position's internal plumbing (not a stand-in that
+    # happens to also support iteration).
+    evaluator = _RecordingEvaluator(model=TicTacToeMLP())
+    position = TicTacToePosition(_mid_game_board(), active_player_id=-1)
+
+    evaluator.evaluate_position(position)
+
+    assert evaluator.received_position is not None
+    assert evaluator.received_position.active_player_id == -1

@@ -1,17 +1,14 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
-
 import torch
 import torch.nn.functional as F
 from torch import Tensor
 
-from examples.tictactoe.tictactoe_ply import TicTacToePly
 from examples.tictactoe.tictactoe_position import TicTacToePosition
 from game_engine_learning.neural_network_evaluator import NeuralNetworkEvaluator
 
 
-class TicTacToeNNEvaluator(NeuralNetworkEvaluator[TicTacToePly, TicTacToePosition]):
+class TicTacToeNNEvaluator(NeuralNetworkEvaluator[TicTacToePosition]):
 
     def encode_position(self, position: TicTacToePosition) -> Tensor:
         # Encode the board as a 1-D float tensor of shape (9,), one value per square.
@@ -24,7 +21,9 @@ class TicTacToeNNEvaluator(NeuralNetworkEvaluator[TicTacToePly, TicTacToePositio
             dtype=torch.float32,
         )
 
-    def decode_policy(self, policy_logits: Tensor, legal_plies: Sequence[TicTacToePly]) -> dict[str, float]:
+    def decode_policy(self, policy_logits: Tensor, position: TicTacToePosition) -> dict[str, float]:
+        legal_plies = position.legal_plies
+
         # Step 1: Mask illegal plies
         # Build a mask tensor: 0.0 for legal squares, -inf for illegal ones.
         # Mask tensor must match the shape of policy_logits so they can be added element-wise.
