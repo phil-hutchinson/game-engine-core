@@ -55,6 +55,30 @@ def test_policy_targets_cover_the_legal_plies() -> None:
     assert all(sample.target_policy == {"1": 1.0} for sample in samples)
 
 
+def test_policy_transform_reframes_targets_using_the_position() -> None:
+    # A transform keyed on active_player_id proves the position is in scope at
+    # capture. Over the forced pile-3 line the mover alternates 1, -1, 1, so the
+    # re-keyed distributions differ per step in a way only the position reveals.
+    def prefix_with_mover(
+        position: NimPosition, policy: dict[str, float]
+    ) -> dict[str, float]:
+        return {f"{position.active_player_id}:{ply}": p for ply, p in policy.items()}
+
+    collector = SelfPlayCollector(
+        evaluator=NimNNEvaluator(model=NimMLP()),
+        engine_factory=lambda: MCTSEngine(evaluator=NullEvaluator(), iterations=10),
+        position_factory=lambda: NimPosition(pile=3, takes=(1,)),
+        policy_transform=prefix_with_mover,
+    )
+    samples = collector.collect(n_games=1)
+    # Emitted last step first: pile 1 (player 1), pile 2 (player -1), pile 3 (player 1).
+    assert [sample.target_policy for sample in samples] == [
+        {"1:1": 1.0},
+        {"-1:1": 1.0},
+        {"1:1": 1.0},
+    ]
+
+
 def test_collect_accumulates_across_games() -> None:
     samples = _collector(starting_pile=3).collect(n_games=2)
     assert len(samples) == 6
