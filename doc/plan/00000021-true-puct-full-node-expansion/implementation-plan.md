@@ -166,6 +166,8 @@ runs 200,000 iterations (0 blunders) and its heuristic engine 200 (0 blunders).
 No change to `examples/tictactoe`, and no change to the default
 `exploration_constant`.
 
+## Step 4 — Re-check the learning path
+
 Confirm the neural-network path behaves under full expansion: the NN evaluator is
 now called once per iteration including at the root, and every root child receives
 a genuine network prior for the first time (previously only deeper nodes did), so
@@ -183,6 +185,32 @@ policy entropy is finite, below the uniform baseline it prints alongside, and th
 the collected samples cover all legal plies per position. A short
 `python -m examples.tictactoe_learning.train` run should still show loss
 decreasing.
+
+### Outcome — targets sharpened, not degenerate; play-time budget corrected
+
+Self-play targets are concentrated where the game is nearly decided, not
+collapsed. Over 300 samples on an untrained network, every legal ply still
+receives a non-zero visit share at every stage, and the opening stays near
+uniform (3.074 bits against a 3.170 uniform baseline) while positions with five
+or six legal plies sharpen to a mean top probability of ~0.65–0.71. All nine
+opening plies still occur across 60 temperature-1.0 games, so self-play
+diversity is intact. The mean entropy drop against the figure recorded in the
+general-cleanup review (2.181 → 1.709 bits) is entirely this late-game
+sharpening — the search resolving tactics it previously spread visits across.
+A six-iteration training run falls steadily on both heads (total 2.735 → 2.412,
+value 0.552 → 0.353, policy 2.183 → 2.059).
+
+One example change: `main.py`'s neural play engine moves from 10 iterations to
+200. The 10 dated from the era this story ends — when the root was never
+evaluated, ten iterations bought one visit per root child and the policy head
+was unused at play time (general-cleanup story review, finding #2, which
+deferred the budget question to whenever the root-prior quirk was fixed).
+Measured against the solver with the checked-in weights, 10 iterations blunders
+in 36.3% of positions, 50 in 12.5%, and 200 in 3.7% at roughly 30 ms per ply —
+so 200 is both defensible and imperceptible, and it matches the self-play and
+heuristic budgets. `tournament.py`'s `--mcts-iterations` default of 100 is left
+alone: it applies equally to every player in a comparison, so it trades absolute
+strength for run time without biasing the result.
 
 ## Step 5 — README and docs check
 
