@@ -226,3 +226,20 @@ Verification (manual): Run `/update-readme` (or review the branch diff against
 `README.md`) and confirm the README either is updated to describe full expansion
 and the resolved prior semantics, or is verified as already accurate. Run `pytest` once more to confirm the branch is green before closing
 the story.
+
+### Outcome — one edit, to the MCTS section
+
+The required policy is the only part of this story a consumer of the package has
+to know about, since it is the one changed contract they can break: an evaluator
+that omits a legal ply now raises. The MCTS section gained a sentence describing
+the expansion model (descend to a leaf, evaluate once, attach a child per legal
+ply) and a short paragraph stating the policy requirement and pointing at
+`NullEvaluator` as the pattern for evaluators without a policy head.
+
+Everything else was checked and left alone: the "what's in the box" table entry
+for `NullEvaluator` ("uniform prior, used as a baseline") is if anything more
+accurate now, `PositionEvaluation (value + policy)` is unchanged, the retention
+paragraph still describes what re-rooting carries forward, and the quick-start
+snippet still runs as written. The search-internal changes — full expansion,
+removed fields, evaluate-then-expand ordering — are implementation detail that
+the README should not carry.
