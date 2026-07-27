@@ -1,0 +1,108 @@
+# Epic: Fleet Play (issue #20)
+
+## Goal
+
+Make MCTS self-play run as a **fleet** — N games advanced in lockstep so that a
+single batched network evaluation serves all N at once, instead of N games each
+making their own sequential evaluator calls. A normal single game is just the
+fleet at `N = 1`.
+
+The performance thesis is a single fact about the network forward pass: it
+dominates self-play wall-clock (≈70% on CPU), and a GPU forward is near-flat in
+cost below its saturation width — a batch of 256 costs little more than a batch
+of 1. Today every game evaluates one position per MCTS iteration on its own, so
+the GPU is fed one position at a time and never saturates. If N games are
+synchronized at **iteration granularity**, each MCTS iteration gathers one leaf
+from every game into a single forward pass, and the GPU is fed N positions at
+once.
+
+Amdahl's law then sets the ceiling: once the forward is batched, the residual
+per-game work (position encoding, the policy transform, legality generation)
+becomes the wall. So the epic also widens the game-facing protocols to be
+**batch-first**, letting a game vectorise those touchpoints too.
+
+## The "wave" structure
+
+One MCTS iteration is turned sideways. Instead of running select → expand →
+evaluate → backpropagate to completion on one tree, each phase sweeps all N
+trees before the next begins, with the batched evaluation as the single
+synchronisation point:
+
+```
+for each game:  select a leaf           →  N leaves
+partition:      terminal vs non-terminal
+                evaluate_positions(non-terminal leaves)   →  ONE batched call
+for each game:  scatter value + backpropagate
+```
+
+Terminal leaves carry a known outcome and never touch the network — they are
+partitioned out of the batch and backpropagate directly. Every live
+non-terminal game contributes exactly one position per wave, keeping the games
+in lockstep (equal iteration budgets ⇒ equal wave counts, so synchronisation is
+automatic). We explicitly do **not** let a game run ahead to fill a bigger
+batch — preserving ply/iteration lockstep is worth more than a marginally wider
+batch.
+
+## Stories
+
+### Phase 1 — the skateboard
+
+| # | Story | Depends on |
+|---|-------|------------|
+| #21 | True PUCT / full node expansion | — |
+| #22 | Batch-first game protocols | — |
+| #23 | Fleet / wave MCTS engine | #21, #22 |
+| #24 | SelfPlayCollector as fleet driver | #22, #23 |
+
+#21 and #22 are independent and may land in either order. #23 consumes both;
+#24 drives #23. Capture the Flag (the downstream consumer) adopts the whole set
+in a single release.
+
+Two decisions shape the cut:
+
+- **#21 is deliberately separate from the fleet.** Fixing expansion to true
+  PUCT is a single-game, search-strength change with almost no intersection with
+  mass play — but the wave *assumes* AlphaZero-style expansion (one evaluation
+  per newly-reached leaf, all children attached at once). Doing it first means
+  #23 inherits search machinery already in the right shape, rather than
+  re-litigating expansion inside the harder story.
+- **#22 batches only the game-connected touchpoints**, not the tree internals.
+  PUCT descent and backpropagation chase parent pointers and depend on each
+  step's argmax; vectorising them is a separate lever (see P1 below), parked for
+  now.
+
+### Phase 2 — backlog (deferred / open)
+
+| Ref | Story | Note |
+|-----|-------|------|
+| P1 | Vectorised node representation | Child stats as parallel arrays on the parent (priors/visits/total_value by ply-slot), lazy child materialisation, vectorised PUCT. Replaces the `policy` dict. |
+| P2 | Position-keyed evaluation cache | LRU cache in front of `evaluate_positions`; introduces a position hash/equality contract. Subsumes retention-as-performance and catches transpositions. |
+| P3 | Speculative batch backfill (tail trimming) | When live games drop below a min-batch floor, prefetch high-prior frontier leaves to keep the GPU saturated during the long tail. Pure cache-fill, **no** speculative backpropagation. Depends on P2. |
+| P4 | Midstream refill / queueing | Start new games as others finish, holding fleet size steady instead of letting it drain. |
+| P5 | Retention decision (open) | Whether anything is retained across plies — eval-cache only vs. visit-stat carryover (a search-strength choice). Genuinely undecided; the skateboard runs from bare roots. |
+| P6 | Fleet tournament play | Extend the fleet path to non-learning tournament / `StandardGame` use. |
+
+## Why the retained tree is out of the skateboard
+
+Tree retention (issue #14) carries two kinds of value: retained **visit
+statistics** (a search-strength lever) and retained **evaluations** (a
+performance lever). The skateboard drops both:
+
+- The strength lever is a separate axis (P5), left open pending a decision on
+  what AlphaZero should do in learning mode.
+- The performance lever largely evaporates under the wave. A wave's cost floor
+  is one GPU forward pass, paid the moment a *single* game needs an evaluation
+  that iteration; cached evaluations for the other games only *narrow* the
+  batch, which is nearly free anyway. So eval-caching saves a whole call only on
+  waves where the entire fleet is cached-or-terminal at once. If that lever is
+  wanted back, its cleaner home is a position-keyed cache in front of the
+  evaluator (P2), not tree-node retention.
+
+## Non-goals (epic-wide)
+
+- Vectorising the tree internals (P1).
+- An evaluation cache and the position hash/equality contract it needs (P2).
+- Speculative prefetch / batch backfill for the long tail (P3).
+- Refilling the fleet with new games midstream (P4) — the skateboard runs a
+  fixed fleet and accepts the long tail.
+- Mass-play tournaments (P6) — the fleet targets self-play only.
