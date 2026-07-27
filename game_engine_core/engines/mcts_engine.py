@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import random
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -43,7 +44,10 @@ class MCTSNode[TPosition: GamePosition[Any], TPly: GamePly]:
     def puct_value(self, exploration_constant: float = 1.41) -> float:
         """PUCT selection score.
 
-        Reduces to UCT when all priors are uniform (policy=None on the evaluator).
+        Note this is not UCT with priors: the exploration term is finite at zero
+        visits, so an unvisited sibling can stay unvisited indefinitely while a
+        high-prior ply is re-selected. Uniform priors do not recover UCB1, whose
+        exploration term is unbounded as visits approach zero.
         """
         assert self.parent is not None
         exploitation = -self.average_value
@@ -140,22 +144,68 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
         return {k: v / total for k, v in counts.items()}
 
     def _mcts_iteration(self, root: MCTSNode[TPosition, TPly]) -> None:
-        """Run one MCTS iteration: Select, Expand, Evaluate, Backpropagate."""
-        node = self._select_leaf(root)
-        expanded_node = self._expand_node(node)
-        value = self._evaluate_node(expanded_node)
-        self._backpropagate(expanded_node, value)
+        """Run one MCTS iteration: Select, Evaluate, Expand, Backpropagate.
+
+        Exactly one evaluation per iteration. The value backpropagated is the
+        leaf's own — expansion only makes the leaf descendable next time, and a
+        terminal leaf is re-scored from its outcome without reaching the
+        evaluator.
+        """
+        selected_node = self._select_leaf(root)
+
+        outcome = selected_node.position.outcome
+        if outcome is not None:
+            value = float(outcome)
+        else:
+            value = self._evaluate_and_expand_node(selected_node)
+
+        self._backpropagate(selected_node, value)
 
     def _select_leaf(self, root: MCTSNode[TPosition, TPly]) -> MCTSNode[TPosition, TPly]:
         """Select path down tree using PUCT until reaching an unexpanded node."""
         current = root
 
-        while current.is_fully_expanded and current.children:
+        while current.children:
             best_child = max(current.children, key=lambda child: child.puct_value())
             current = best_child
 
         return current
 
+    def _evaluate_and_expand_node(self, node: MCTSNode[TPosition, TPly]) -> float:
+        """Evaluate a non-terminal leaf and attach a child for every legal ply.
+
+        The policy is consumed here and not retained: a prior is only ever read
+        at child construction. Evaluators must supply one covering every legal
+        ply (see PositionEvaluation.policy) — the engine has no uniform default.
+        """
+        assert node.position.outcome is None
+
+        evaluation = self.evaluator.evaluate_position(node.position)
+        policy = evaluation.policy
+        legal_plies: Sequence[TPly] = node.position.legal_plies
+
+        # Build the children before attaching any, so an incomplete policy leaves
+        # the node an unexpanded leaf rather than a half-expanded one.
+        children: list[MCTSNode[TPosition, TPly]] = []
+        for legal_ply in legal_plies:
+            ply_key = str(legal_ply)
+            try:
+                prior = policy[ply_key]
+            except KeyError:
+                raise ValueError(f"Policy missing entry for move '{ply_key}'") from None
+            new_position = node.position.apply_ply(legal_ply) # lazy would be ideal
+            children.append(MCTSNode(
+                position=new_position,
+                parent=node,
+                ply_from_parent=legal_ply,
+                prior=prior,
+            ))
+
+        node.children.extend(children)
+        return evaluation.value
+
+
+    # deprecated - unreachable
     def _expand_node(self, node: MCTSNode[TPosition, TPly]) -> MCTSNode[TPosition, TPly]:
         """Expand node by adding one new child, or return node if terminal."""
         if node.position.outcome is not None:
@@ -189,6 +239,7 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
         node.children.append(child)
         return child
 
+    # deprecated - unreachable
     def _evaluate_node(self, node: MCTSNode[TPosition, TPly]) -> float:
         """Evaluate the node using the position evaluator."""
         outcome = node.position.outcome

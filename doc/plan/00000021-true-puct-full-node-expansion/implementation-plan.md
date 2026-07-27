@@ -12,20 +12,35 @@ The developer implements the engine changes (Steps 1 and 2 production code).
 Claude writes and updates the tests for every step, and owns any changes to the
 `examples/tictactoe` and `examples/tictactoe_learning` applications.
 
-## Assumptions
+## Decisions
 
-Two points the story leaves open, resolved here so Step 1 is unambiguous. Raise
-them before starting if either is wrong.
+Two points the story leaves open, resolved here so Step 1 is unambiguous.
 
-- **Priors when the evaluator supplies no policy.** The story says to remove the
-  uniform-prior fallback, which is the `prior = 1.0` assignment that exists only
-  because the root was never evaluated. A policy-less evaluator is still
-  supported (`NullEvaluator` ships in the package, and `PositionEvaluation.policy`
-  is documented as optional), so expansion still needs a prior in that case —
-  this plan assumes an actual uniform distribution, `1 / len(legal_plies)`, rather
-  than the current `1.0`. Note this is a real change in exploration scale: with
-  nine legal plies the exploration term shrinks ninefold against today's
-  behaviour, which is what Step 3 exists to measure.
+- **A policy is required; there is no engine-side fallback.** The story says to
+  remove the uniform-prior fallback (the `prior = 1.0` assignment, which existed
+  only because the root was never evaluated). Rather than replace it with a
+  uniform fallback inside the engine, the engine now *requires* every evaluation
+  to carry a policy, and `NullEvaluator` supplies a uniform one itself. The
+  reason: under full expansion a prior is structural — every child needs one at
+  construction, on every path — so "optional policy" is a false option, since
+  something must invent the numbers regardless. The only question is who, and
+  putting it in the evaluator that declined a policy head keeps the engine's hot
+  path branch-free and keeps the fleet wave's bulk expansion (#23) free of a
+  per-game special case. Two consequences to accept deliberately: this makes
+  `PositionEvaluation.policy` a required field, which is a contract change the
+  story's non-goals arguably fence off as #22's (judged fair game at `0.1.0` with
+  three in-repo implementations); and `NullEvaluator` must now generate
+  `legal_plies` to build its uniform policy, which the engine then generates again
+  when expanding — real duplicated work on that path, accepted because the cost
+  lands on the evaluator that opted out.
+- **The "reduces to UCT" claim is retired, not relocated.** It was never true of
+  the formula: UCB1's exploration term is unbounded as visits approach zero, which
+  is what forces every sibling to be tried once, whereas PUCT's is finite at zero
+  visits. The old engine only behaved that way because one-child-per-iteration
+  expansion did the round-robin by hand — so this story is precisely what
+  invalidates the claim. `MCTSNode.puct_value` and `PositionEvaluation.policy`
+  both assert it today and are corrected in Step 1, since the same change makes
+  them wrong.
 - **What marks a leaf.** "Not yet evaluated" is observable as "has no children",
   because full expansion attaches every legal ply at once and a terminal position
   has no legal plies. This plan assumes the childless test rather than a new
@@ -44,9 +59,12 @@ legal ply of that leaf, each seeded with its prior from the returned policy;
 backpropagate the value from that leaf. Backpropagation now starts at the
 evaluated leaf itself rather than at a newly created child, so a fresh root is
 evaluated and expanded by iteration 1 and receives real priors for its children.
-The existing policy-completeness check (raise when a legal ply is missing from
-the policy) moves to full expansion, where it covers every legal ply in one pass.
-Keep the `is_fully_expanded` / `unexplored_plies` machinery in place for now if it
+The existing policy-completeness check (raise `ValueError` naming the ply missing
+from the policy) moves to full expansion, where it covers every legal ply in one
+pass. Per the decisions above, make `PositionEvaluation.policy` required, drop the
+engine's fallback, have `NullEvaluator` return a uniform policy over the legal
+plies, and correct the two docstrings that claim UCT equivalence. Keep the
+`is_fully_expanded` / `unexplored_plies` machinery in place for now if it
 simplifies the diff; Step 2 removes it.
 
 Depends on: nothing (entry point). Steps 2–5 all depend on this behaviour being
@@ -63,9 +81,11 @@ uniform branch), and `test_observe_ply_miss_on_unexplored_child_clears_root_and_
 constructed deliberately rather than by running a single iteration). New tests to
 add: the root is evaluated and fully expanded after one iteration, with priors
 taken from the evaluator's policy rather than a uniform default; the evaluator is
-called exactly once per iteration (a counting evaluator); and — the point of the
-story — a child with a dominant prior is re-selected while a low-prior sibling
-stays at zero visits, which the old code could not produce.
+called exactly once per iteration (a counting evaluator); a terminal leaf is
+re-scored from its outcome without reaching the evaluator; `NullEvaluator`
+produces a uniform policy summing to one; and — the point of the story — a child
+with a dominant prior is re-selected while a low-prior sibling stays at zero
+visits, which the old code could not produce.
 
 Verification (automated): Run `pytest tests/core/test_mcts_engine.py` and confirm
 the updated suite is green, including the new prior-dominance and
@@ -81,10 +101,7 @@ expansion and never read again — the non-goals allow discarding it), and the
 "include unexplored plies with 0 visits" reconciliation in `_visit_distribution`,
 which can now read counts straight off the children — note the uniform fallback
 for a root with no children at all (`iterations=0`) still needs `legal_plies` and
-stays. Update the docstrings that describe
-the old model: `MCTSNode.puct_value`'s "reduces to UCT" note and
-`PositionEvaluation.policy`'s description of the uniform fallback both need to
-match the resolved prior semantics.
+stays.
 
 Depends on: Step 1 (nothing may reference these once the new flow is the only
 flow).

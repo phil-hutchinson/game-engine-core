@@ -43,10 +43,11 @@ def test_search_values_carry_correct_signs() -> None:
     assert root.average_value > 0
     # The winning ply attracts the visits.
     assert children["2"].visits > children["1"].visits
-    # Visit accounting: every iteration's backpropagation path passes through
-    # the root and exactly one of its children.
+    # Visit accounting: every iteration's backpropagation path passes through the
+    # root, but the first iteration stops at the root itself (evaluating and
+    # expanding it), so only the remaining 99 reach a child.
     assert root.visits == 100
-    assert children["1"].visits + children["2"].visits == 100
+    assert children["1"].visits + children["2"].visits == 99
 
 
 def test_select_ply_on_position_without_plies_raises() -> None:
@@ -68,11 +69,20 @@ def test_visit_distribution_covers_all_legal_plies_and_sums_to_one() -> None:
 
 
 def test_visit_distribution_includes_zero_visit_plies() -> None:
-    # One iteration expands exactly one root child; the other legal ply must
-    # still appear in the distribution, with probability 0.
-    _, policy = _engine(iterations=1).select_ply_with_policy(NimPosition(pile=5))
+    # Iteration 1 evaluates and expands the root, attaching both children at 0
+    # visits; iteration 2 descends into exactly one of them. The sibling is a
+    # child by then rather than an unexplored ply, but must still appear in the
+    # distribution with probability 0.
+    _, policy = _engine(iterations=2).select_ply_with_policy(NimPosition(pile=5))
     assert set(policy) == {"1", "2"}
     assert sorted(policy.values()) == [0.0, 1.0]
+
+
+def test_visit_distribution_is_uniform_while_every_child_is_unvisited() -> None:
+    # After the single iteration that expands the root, every child exists at 0
+    # visits, so there are no counts to normalise and the uniform fallback holds.
+    _, policy = _engine(iterations=1).select_ply_with_policy(NimPosition(pile=5))
+    assert policy == {"1": 0.5, "2": 0.5}
 
 
 def test_visit_distribution_uniform_fallback_without_visits() -> None:
@@ -101,21 +111,79 @@ def test_backpropagation_alternates_value_sign_per_level() -> None:
     assert (leaf.visits, mid.visits, root.visits) == (2, 2, 2)
 
 
-def test_policy_priors_are_distributed_to_children() -> None:
-    # Drives the private _expand_node with a policy already stored on the node
-    # (the engine sets node.policy at evaluation time; see finding #2 in the
-    # general-cleanup review for why the root itself never carries one).
-    engine = _engine(iterations=0)
-    node: MCTSNode[NimPosition, NimPly] = MCTSNode(
-        position=NimPosition(pile=5), parent=None, ply_from_parent=None
-    )
-    node.policy = {"1": 0.25, "2": 0.75}
+class _FixedPolicyEvaluator:
+    """Evaluator returning a known, deliberately skewed policy over takes 1-2."""
 
-    engine._expand_node(node)  # pyright: ignore[reportPrivateUsage]
-    engine._expand_node(node)  # pyright: ignore[reportPrivateUsage]
+    def __init__(self, policy: dict[str, float]):
+        self._policy = policy
+        self.calls = 0
 
-    priors = {str(child.ply_from_parent): child.prior for child in node.children}
+    def evaluate_position(self, position: NimPosition) -> PositionEvaluation:
+        self.calls += 1
+        return PositionEvaluation(value=0.0, policy=dict(self._policy))
+
+
+def _policy_engine(
+    policy: dict[str, float], iterations: int
+) -> tuple[MCTSEngine[NimPly, NimPosition, _FixedPolicyEvaluator], _FixedPolicyEvaluator]:
+    evaluator = _FixedPolicyEvaluator(policy)
+    return MCTSEngine(evaluator=evaluator, iterations=iterations), evaluator
+
+
+def test_first_iteration_evaluates_the_root_and_attaches_every_child() -> None:
+    # The root is simply the first leaf, so one iteration is enough to expand it
+    # fully — and its children carry real priors from the evaluator rather than
+    # the uniform default the old expand-a-child flow left them with.
+    engine, evaluator = _policy_engine({"1": 0.25, "2": 0.75}, iterations=1)
+    root = engine._create_root(NimPosition(pile=5))  # pyright: ignore[reportPrivateUsage]
+    engine._grow_tree(root)  # pyright: ignore[reportPrivateUsage]
+
+    assert evaluator.calls == 1
+    assert root.visits == 1
+    priors = {str(child.ply_from_parent): child.prior for child in root.children}
     assert priors == {"1": 0.25, "2": 0.75}
+    # Expansion alone confers no visits: the value backpropagated is the root's.
+    assert [child.visits for child in root.children] == [0, 0]
+
+
+def test_a_dominant_prior_is_reselected_while_its_sibling_stays_unvisited() -> None:
+    # The point of true PUCT. An unvisited child scores on its exploration term
+    # alone, which is proportional to its prior, so a 0.99-prior ply is taken
+    # every time while its 0.01-prior sibling never gets a visit. The old
+    # one-child-per-iteration expansion could not produce this: it visited every
+    # sibling once before PUCT governed anything.
+    # Pile 20 keeps every leaf reached within 5 iterations non-terminal, so the
+    # values stay flat at 0 and the priors are the only thing driving selection.
+    engine, _ = _policy_engine({"1": 0.99, "2": 0.01}, iterations=5)
+    root = engine._create_root(NimPosition(pile=20))  # pyright: ignore[reportPrivateUsage]
+    engine._grow_tree(root)  # pyright: ignore[reportPrivateUsage]
+
+    visits = {str(child.ply_from_parent): child.visits for child in root.children}
+    assert visits == {"1": 4, "2": 0}
+
+
+def test_evaluator_is_called_exactly_once_per_iteration() -> None:
+    # The property the fleet wave depends on. Pile 20 is deep enough that no leaf
+    # reached in 5 iterations is terminal, so every iteration takes the evaluator.
+    engine, evaluator = _policy_engine({"1": 0.5, "2": 0.5}, iterations=5)
+    engine.select_ply(NimPosition(pile=20))
+
+    assert evaluator.calls == 5
+
+
+def test_terminal_leaves_are_scored_from_their_outcome_without_evaluating() -> None:
+    # From pile 1 the only ply empties the pile, so after the root is expanded
+    # every later iteration lands on that terminal child and re-reads its
+    # outcome. The evaluator is never called again.
+    engine, evaluator = _policy_engine({"1": 1.0}, iterations=5)
+    root = engine._create_root(NimPosition(pile=1))  # pyright: ignore[reportPrivateUsage]
+    engine._grow_tree(root)  # pyright: ignore[reportPrivateUsage]
+
+    assert evaluator.calls == 1
+    terminal_child = root.children[0]
+    assert terminal_child.visits == 4
+    # -1 from the perspective of the player left facing the empty pile.
+    assert terminal_child.average_value == -1.0
 
 
 class _IncompletePolicyEvaluator:
@@ -129,8 +197,24 @@ def test_policy_missing_a_legal_ply_raises() -> None:
     engine: MCTSEngine[NimPly, NimPosition, _IncompletePolicyEvaluator] = MCTSEngine(
         evaluator=_IncompletePolicyEvaluator(), iterations=50
     )
-    with pytest.raises(ValueError):
+    # The message must name the offending ply: it is what tells an evaluator
+    # author which entry their policy head dropped.
+    with pytest.raises(ValueError, match="'2'"):
         engine.select_ply(NimPosition(pile=5))
+
+
+def test_incomplete_policy_leaves_the_node_unexpanded() -> None:
+    # Expansion is all-or-nothing. A node left holding the children created
+    # before the bad ply would read as expanded and never be evaluated again.
+    engine: MCTSEngine[NimPly, NimPosition, _IncompletePolicyEvaluator] = MCTSEngine(
+        evaluator=_IncompletePolicyEvaluator(), iterations=50
+    )
+    root = engine._create_root(NimPosition(pile=5))  # pyright: ignore[reportPrivateUsage]
+
+    with pytest.raises(ValueError):
+        engine._grow_tree(root)  # pyright: ignore[reportPrivateUsage]
+
+    assert root.children == []
 
 
 def test_temperature_zero_picks_most_visited_ply() -> None:
@@ -180,21 +264,21 @@ def test_observe_ply_rerroots_onto_matching_child_preserving_subtree() -> None:
     assert new_root.children is expected_children
 
 
-def test_observe_ply_miss_on_unexplored_child_clears_root_and_rebuilds() -> None:
-    # A single iteration expands exactly one root child, leaving the other legal
-    # ply unexplored.
-    engine = _engine(iterations=1)
+def test_observe_ply_miss_clears_root_and_rebuilds() -> None:
+    # Full expansion makes a miss on a *legal* ply impossible: once the root has
+    # been evaluated every legal ply is a child, so the branch can only be reached
+    # by a ply the tree has never seen. Constructed here with a take of 3, outside
+    # the position's permitted takes, since no search can produce one.
+    engine = _engine(iterations=10)
     position = NimPosition(pile=5)
     engine.select_ply(position)
     root = engine._root_node  # pyright: ignore[reportPrivateUsage]
     assert root is not None
-    explored_takes = {child.ply_from_parent.take for child in root.children}  # type: ignore[union-attr]
-    assert len(explored_takes) == 1
-    unexplored_take = next(take for take in (1, 2) if take not in explored_takes)
-    unexplored_ply = NimPly(unexplored_take)
-    new_position = position.apply_ply(unexplored_ply)
+    assert {child.ply_from_parent.take for child in root.children} == {1, 2}  # type: ignore[union-attr]
+    unseen_ply = NimPly(3)
+    new_position = NimPosition(pile=2, active_player_id=-1)
 
-    engine.observe_ply(position, unexplored_ply, new_position)
+    engine.observe_ply(position, unseen_ply, new_position)
 
     assert engine._root_node is None  # pyright: ignore[reportPrivateUsage]
     selected = engine.select_ply(new_position)
