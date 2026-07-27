@@ -140,7 +140,31 @@ null-evaluator and heuristic-evaluator engines and confirm the AI still blocks
 threats and takes wins as before. A pure-MCTS TicTacToe player should be
 unbeatable; anything less is a regression to investigate before proceeding.
 
-## Step 4 — Re-check the learning path
+### Outcome — no retuning warranted
+
+Measured as blunder rate against a negamax solver over all 1090 distinct
+non-terminal positions reachable in five plies. The engine is now deterministic
+(the expansion shuffle is gone and every tie-break is a `max`), so these are
+exact rates, not samples. The old exploration scale was reproduced under the new
+engine by an evaluator returning all-`1.0` priors, which isolates the scale
+change from the expansion change:
+
+| iterations | 1/K priors (new) | 1.0 priors (old scale) | heuristic |
+| --- | --- | --- | --- |
+| 50 | 12.3% | 11.1% | 0.7% |
+| 200 | 3.6% | 5.2% | 0.0% |
+| 1000 | 0.3% | 0.8% | 0.0% |
+| 5000+ | 0.0% | 0.0% | 0.0% |
+
+Normalised priors are neither wrong nor in need of a compensating constant: they
+are *better* from 200 iterations up, since narrowing exploration concentrates
+visits where visit-count selection reads them. Below ~100 iterations the old
+wider scale is marginally better, which is the expected crossover — with nine
+legal plies and a budget that small, the risk is failing to sample a ply at all.
+Neither example is anywhere near that regime: `main.py`'s null-evaluator engine
+runs 200,000 iterations (0 blunders) and its heuristic engine 200 (0 blunders).
+No change to `examples/tictactoe`, and no change to the default
+`exploration_constant`.
 
 Confirm the neural-network path behaves under full expansion: the NN evaluator is
 now called once per iteration including at the root, and every root child receives
