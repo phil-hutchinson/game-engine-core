@@ -19,15 +19,15 @@ class MCTSNode[TPosition: GamePosition[Any], TPly: GamePly]:
     parent: MCTSNode[TPosition, TPly] | None
     ply_from_parent: TPly | None  # ply that led to this position
     children: list[MCTSNode[TPosition, TPly]] = field(default_factory=lambda: [])
-    unexplored_plies: list[TPly] | None = None
 
     # MCTS statistics
     visits: int = 0
     total_value: float = 0.0
 
-    # Policy head output stored at evaluation time; distributed to children as priors on expansion.
+    # Share of the parent's policy mass for the ply leading here, set when the
+    # parent was expanded. Drives the PUCT exploration term. A root's own prior
+    # is never read, since selection only ever scores children.
     prior: float = 1.0
-    policy: dict[str, float] | None = None
 
     @property
     def average_value(self) -> float:
@@ -35,11 +35,6 @@ class MCTSNode[TPosition: GamePosition[Any], TPly: GamePly]:
         if self.visits == 0:
             return 0.0
         return self.total_value / self.visits
-
-    @property
-    def is_fully_expanded(self) -> bool:
-        """True if all possible moves have been tried."""
-        return (self.unexplored_plies is not None) and len(self.unexplored_plies) == 0
 
     def puct_value(self, exploration_constant: float = 1.41) -> float:
         """PUCT selection score.
@@ -97,9 +92,10 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
     def select_ply_with_policy(self, game_position: TPosition) -> tuple[TPly, dict[str, float]]:
         """Select the best ply and return the MCTS visit distribution over all legal plies.
 
-        The visit distribution is the normalised visit count for each legal ply at the root,
-        including unexplored plies (which receive 0 visits and thus 0 probability). It is
-        used as the policy training target during self-play data collection.
+        The visit distribution is the normalised visit count for each legal ply at the root.
+        Expansion attaches a child per legal ply, so plies the search never descended into
+        are present with 0 visits and thus 0 probability. It is used as the policy training
+        target during self-play data collection.
 
         Returns:
             A tuple of (selected_ply, policy) where policy maps str(ply) to probability
@@ -129,19 +125,19 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
 
     def _visit_distribution(self, root: MCTSNode[TPosition, TPly]) -> dict[str, float]:
         """Return a normalised visit-count distribution over all legal plies at the root."""
-        legal_plies = list(root.position.legal_plies)
         child_visits: dict[str, int] = {
             str(child.ply_from_parent): child.visits
             for child in root.children
             if child.ply_from_parent is not None
         }
-        # Include unexplored legal plies with 0 visits so the dict covers all legal plies.
-        counts = {str(ply): child_visits.get(str(ply), 0) for ply in legal_plies}
-        total = sum(counts.values())
+        total = sum(child_visits.values())
         if total == 0:
-            n = len(legal_plies)
-            return {k: 1.0 / n for k in counts}
-        return {k: v / total for k, v in counts.items()}
+            # No counts to normalise: either the root was never expanded, or it
+            # was expanded but no iteration descended past it. Only this branch
+            # needs the legal plies, since an unexpanded root has no children.
+            legal_plies = list(root.position.legal_plies)
+            return {str(ply): 1.0 / len(legal_plies) for ply in legal_plies}
+        return {k: v / total for k, v in child_visits.items()}
 
     def _mcts_iteration(self, root: MCTSNode[TPosition, TPly]) -> None:
         """Run one MCTS iteration: Select, Evaluate, Expand, Backpropagate.
@@ -162,7 +158,11 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
         self._backpropagate(selected_node, value)
 
     def _select_leaf(self, root: MCTSNode[TPosition, TPly]) -> MCTSNode[TPosition, TPly]:
-        """Select path down tree using PUCT until reaching an unexpanded node."""
+        """Descend by PUCT to a leaf: a node with no children.
+
+        That is either a node not yet evaluated, or a terminal one — which never
+        gains children and so is reached as a leaf on every iteration it wins.
+        """
         current = root
 
         while current.children:
@@ -203,53 +203,6 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
 
         node.children.extend(children)
         return evaluation.value
-
-
-    # deprecated - unreachable
-    def _expand_node(self, node: MCTSNode[TPosition, TPly]) -> MCTSNode[TPosition, TPly]:
-        """Expand node by adding one new child, or return node if terminal."""
-        if node.position.outcome is not None:
-            return node
-
-        if node.unexplored_plies is None:
-            node.unexplored_plies = list(node.position.legal_plies)
-            # Shuffle once so expansion order carries no systematic bias from the
-            # ordering of legal_plies (pop() would otherwise always expand end-first).
-            random.shuffle(node.unexplored_plies)
-
-        if not node.unexplored_plies:
-            return node
-
-        ply = node.unexplored_plies.pop()
-        new_position = node.position.apply_ply(ply)
-
-        prior = 1.0
-        if node.policy is not None:
-            ply_key = str(ply)
-            if ply_key not in node.policy:
-                raise ValueError(f"Policy missing entry for move '{ply_key}'")
-            prior = node.policy[ply_key]
-
-        child: MCTSNode[TPosition, TPly] = MCTSNode(
-            position=new_position,
-            parent=node,
-            ply_from_parent=ply,
-            prior=prior,
-        )
-        node.children.append(child)
-        return child
-
-    # deprecated - unreachable
-    def _evaluate_node(self, node: MCTSNode[TPosition, TPly]) -> float:
-        """Evaluate the node using the position evaluator."""
-        outcome = node.position.outcome
-        if outcome is not None:
-            return float(outcome)
-
-        result = self.evaluator.evaluate_position(node.position)
-        if result.policy is not None:
-            node.policy = dict(result.policy)
-        return result.value
 
     def _backpropagate(self, node: MCTSNode[TPosition, TPly], value: float) -> None:
         """Update statistics for this node and all ancestors."""
