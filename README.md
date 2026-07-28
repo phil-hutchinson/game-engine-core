@@ -54,7 +54,7 @@ The examples ship with their own pytest suites ([`examples/tictactoe/tests`](exa
 
 ## MCTS and neural network support
 
-`MCTSEngine` uses PUCT selection and AlphaZero-style expansion: each search iteration descends to a leaf, evaluates it exactly once, and attaches a child for every legal ply seeded with its prior. It accepts any `PositionEvaluator` implementation, so a neural network policy/value head can be dropped in without changing the search logic. The evaluator returns a `PositionEvaluation` with a scalar value (from the current player's perspective) and a policy dict mapping plies to prior probabilities.
+`MCTSEngine` uses PUCT selection and full node expansion: each search iteration descends to a leaf, evaluates it exactly once, and attaches a child for every legal ply seeded with its prior. It accepts any `PositionEvaluator` implementation, so a neural network policy/value head can be dropped in without changing the search logic. The evaluator returns a `PositionEvaluation` with a scalar value (from the current player's perspective) and a policy dict mapping plies to prior probabilities.
 
 The policy is **required** and must cover every legal ply of the position, because expansion needs a prior for each child it creates. An evaluator with no policy head should return a uniform distribution over the legal plies, as `NullEvaluator` does.
 
