@@ -31,12 +31,19 @@ game," so the games stay synchronised with no explicit coordination.
 One wave:
 
 1. **Select** one leaf in every tree by PUCT descent.
-2. **Partition** the leaves: terminal (outcome known) vs. non-terminal.
+2. **Partition** the leaves: terminal (outcome known, via `batch_ops.outcomes`)
+   vs. non-terminal.
 3. **Evaluate** the non-terminal leaves in a single `evaluate_positions(...)`
    call (#22).
 4. **Scatter + backpropagate**: give each non-terminal leaf its returned value
-   and expand its children (full expansion, #21); backpropagate terminal leaves
-   directly from their outcome. Every live game advances exactly one iteration.
+   and expand its children (full expansion, #21, via `batch_ops.legal_plies` /
+   `batch_ops.apply_plies`); backpropagate terminal leaves directly from their
+   outcome. Every live game advances exactly one iteration.
+
+`batch_ops` (`BatchPositionProcessor`, #22) is the seam for all of this — the
+engine already reaches every position through it as of #22, one call per
+position; this story is what widens those calls from N calls of width 1 to one
+call of width N.
 
 Two consequences drive the implementation:
 
@@ -63,9 +70,9 @@ a fleet method that holds all N trees at once. This is that method.
 
 - Hold N trees (`list` of roots) instead of a single `_root_node`; index games
   by slot.
-- Implement the wave: per-wave leaf selection, terminal partition, one batched
-  `evaluate_positions`, scatter of values + full expansion, per-tree
-  backpropagation.
+- Implement the wave: per-wave leaf selection, terminal partition (via
+  `batch_ops`), one batched `evaluate_positions`, scatter of values + full
+  expansion (via `batch_ops`), per-tree backpropagation.
 - `select_ply` / `select_ply_with_policy` delegate to the plural forms at
   `N = 1`, keeping single-game behaviour identical.
 - Build fresh (bare) roots from the supplied positions on each call — no

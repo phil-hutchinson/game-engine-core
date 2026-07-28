@@ -43,6 +43,11 @@ automatic). We explicitly do **not** let a game run ahead to fill a bigger
 batch — preserving ply/iteration lockstep is worth more than a marginally wider
 batch.
 
+The terminal partition and, at expansion, the legality and successor calls all
+go through the `BatchPositionProcessor` seam (`batch_ops`, #22) rather than the
+position directly — #22 lands that seam with every call still batch-of-one; #23
+is what widens the calls it makes through it to width N.
+
 ## Stories
 
 ### Phase 1 — the skateboard
