@@ -46,8 +46,8 @@ class _FixedPolicyEvaluator:
     def __init__(self, policy: dict[str, float]):
         self._policy = policy
 
-    def evaluate_position(self, position: NimPosition) -> PositionEvaluation:
-        return PositionEvaluation(value=0.0, policy=dict(self._policy))
+    def evaluate_positions(self, positions: Sequence[NimPosition]) -> Sequence[PositionEvaluation]:
+        return [PositionEvaluation(value=0.0, policy=dict(self._policy)) for _ in positions]
 
 
 def _engine_with_recorder(iterations: int) -> tuple[MCTSEngine[NimPly, NimPosition, _FixedPolicyEvaluator], _RecordingBatchProcessor]:

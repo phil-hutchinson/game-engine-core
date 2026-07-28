@@ -1,4 +1,4 @@
-"""NeuralNetworkEvaluator base-class tests: the evaluate_position contract."""
+"""NeuralNetworkEvaluator base-class tests: the evaluate_positions contract."""
 
 import pytest
 
@@ -9,7 +9,7 @@ from .nim_nn import NimMLP, NimNNEvaluator
 
 def test_evaluation_has_bounded_value_and_normalised_policy() -> None:
     evaluator = NimNNEvaluator(model=NimMLP())
-    evaluation = evaluator.evaluate_position(NimPosition(pile=5))
+    evaluation = evaluator.evaluate_positions([NimPosition(pile=5)])[0]
 
     assert -1.0 <= evaluation.value <= 1.0
     assert evaluation.policy is not None
@@ -20,7 +20,7 @@ def test_evaluation_has_bounded_value_and_normalised_policy() -> None:
 def test_policy_covers_only_legal_plies() -> None:
     evaluator = NimNNEvaluator(model=NimMLP())
     # Pile 1: take 2 is illegal and must receive no probability mass.
-    evaluation = evaluator.evaluate_position(NimPosition(pile=1))
+    evaluation = evaluator.evaluate_positions([NimPosition(pile=1)])[0]
 
     assert evaluation.policy == {"1": pytest.approx(1.0)}
 
@@ -34,8 +34,8 @@ def test_inference_runs_in_eval_mode_even_after_training_left_train_mode() -> No
     evaluator = NimNNEvaluator(model=model)
     model.train()
 
-    first = evaluator.evaluate_position(NimPosition(pile=5))
-    second = evaluator.evaluate_position(NimPosition(pile=5))
+    first = evaluator.evaluate_positions([NimPosition(pile=5)])[0]
+    second = evaluator.evaluate_positions([NimPosition(pile=5)])[0]
 
     assert first.value == second.value
     assert first.policy == second.policy

@@ -24,7 +24,7 @@ def _evaluator() -> TicTacToeNNEvaluator:
 
 
 class _RecordingEvaluator(TicTacToeNNEvaluator):
-    """Records the object evaluate_position hands to decode_policy.
+    """Records the object evaluate_positions hands to decode_policy.
 
     Delegates to the real decode_policy so the recorded object's behaviour
     (not just its identity) still gets exercised.
@@ -114,16 +114,16 @@ def test_decode_policy_ignores_logits_on_illegal_squares() -> None:
         assert with_illegal_spike[str(ply)] == pytest.approx(baseline[str(ply)])
 
 
-def test_evaluate_position_passes_the_position_itself_to_decode_policy() -> None:
+def test_evaluate_positions_passes_the_position_itself_to_decode_policy() -> None:
     # decode_policy must receive the position, not merely a sequence of legal
     # plies derived from it: read active_player_id, a property that only
     # exists on the position, to confirm the real object reaches decode_policy
-    # through evaluate_position's internal plumbing (not a stand-in that
+    # through evaluate_positions's internal plumbing (not a stand-in that
     # happens to also support iteration).
     evaluator = _RecordingEvaluator(model=TicTacToeMLP())
     position = TicTacToePosition(_mid_game_board(), active_player_id=-1)
 
-    evaluator.evaluate_position(position)
+    evaluator.evaluate_positions([position])
 
     assert evaluator.received_position is not None
     assert evaluator.received_position.active_player_id == -1

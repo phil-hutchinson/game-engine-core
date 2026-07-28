@@ -199,7 +199,7 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
         """
         assert self._batch_ops.outcomes([node.position])[0] is None
 
-        evaluation = self.evaluator.evaluate_position(node.position)
+        evaluation = self.evaluator.evaluate_positions([node.position])[0]
         policy = evaluation.policy
         legal_plies: Sequence[TPly] = self._batch_ops.legal_plies([node.position])[0]
 

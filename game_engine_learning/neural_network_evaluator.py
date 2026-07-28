@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from typing import Any
 
 import torch
@@ -21,8 +22,9 @@ class NeuralNetworkEvaluator[TPosition: GamePosition[Any]](ABC):
     (batch, *sample_shape) — where sample_shape is whatever encode_position
     produces for a single position — and return (value_tensor, policy_logits),
     each with a leading batch dimension. This matches how TrainingLoop feeds the
-    model; evaluate_position adds and removes the batch dimension itself, so the
-    model never needs to handle unbatched input.
+    model; evaluate_positions currently loops a batch-of-one call per position,
+    so the model still never sees more than one row at a time here (a genuinely
+    stacked forward pass is a later step).
     """
 
     def __init__(self, model: nn.Module):
@@ -34,11 +36,11 @@ class NeuralNetworkEvaluator[TPosition: GamePosition[Any]](ABC):
 
         The tensor represents a single position without a batch dimension —
         1-D for an MLP, multi-dimensional for a CNN, etc. Callers add the batch
-        dimension themselves (evaluate_position wraps the sample in a batch of
-        size 1; TrainingLoop stacks samples into a batch). Values should be
-        encoded from the
-        active player's perspective so the model always reasons about "my pieces"
-        vs "opponent pieces" regardless of which player is moving.
+        dimension themselves (evaluate_positions currently wraps each sample in
+        a batch of size 1; TrainingLoop stacks samples into a batch). Values
+        should be encoded from the active player's perspective so the model
+        always reasons about "my pieces" vs "opponent pieces" regardless of
+        which player is moving.
 
         Args:
             position: The current game position to encode.
@@ -70,7 +72,12 @@ class NeuralNetworkEvaluator[TPosition: GamePosition[Any]](ABC):
         """
         ...
 
-    def evaluate_position(self, position: TPosition) -> PositionEvaluation:
+    def evaluate_positions(self, positions: Sequence[TPosition]) -> Sequence[PositionEvaluation]:
+        # Interim: one batch-of-one forward pass per position. A genuinely
+        # stacked forward pass over the whole input is a later step.
+        return [self._evaluate_position(position) for position in positions]
+
+    def _evaluate_position(self, position: TPosition) -> PositionEvaluation:
         # Encode the board state into a tensor the model can process.
         encoded = self.encode_position(position)
 

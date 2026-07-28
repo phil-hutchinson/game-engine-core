@@ -19,7 +19,8 @@ def _position_with_win_and_block() -> TicTacToePosition:
 
 
 def test_policy_is_a_distribution_over_the_legal_plies() -> None:
-    evaluation = TicTacToeHeuristicEvaluator().evaluate_position(_position_with_win_and_block())
+    evaluations = TicTacToeHeuristicEvaluator().evaluate_positions([_position_with_win_and_block()])
+    evaluation = evaluations[0]
 
     assert evaluation.policy is not None
     assert set(evaluation.policy) == {"3", "6", "7", "8", "9"}
@@ -28,7 +29,8 @@ def test_policy_is_a_distribution_over_the_legal_plies() -> None:
 
 
 def test_winning_move_gets_the_most_policy_mass() -> None:
-    evaluation = TicTacToeHeuristicEvaluator().evaluate_position(_position_with_win_and_block())
+    evaluations = TicTacToeHeuristicEvaluator().evaluate_positions([_position_with_win_and_block()])
+    evaluation = evaluations[0]
 
     policy = evaluation.policy
     assert policy is not None
@@ -39,5 +41,19 @@ def test_winning_move_gets_the_most_policy_mass() -> None:
 
 
 def test_value_stays_in_bounds() -> None:
-    evaluation = TicTacToeHeuristicEvaluator().evaluate_position(_position_with_win_and_block())
-    assert -1.0 <= evaluation.value <= 1.0
+    evaluations = TicTacToeHeuristicEvaluator().evaluate_positions([_position_with_win_and_block()])
+    assert -1.0 <= evaluations[0].value <= 1.0
+
+
+def test_evaluations_are_aligned_by_index_not_copies_of_the_first() -> None:
+    # A fresh board (no threats, uniform-ish policy) alongside the win-and-block
+    # position: a mispairing would show up as the fresh board's evaluation
+    # carrying the other position's decisive value or policy shape.
+    fresh = TicTacToePosition.new_game()
+    decisive = _position_with_win_and_block()
+
+    evaluations = TicTacToeHeuristicEvaluator().evaluate_positions([fresh, decisive])
+
+    assert set(evaluations[0].policy) == {str(i) for i in range(1, 10)}
+    assert set(evaluations[1].policy) == {"3", "6", "7", "8", "9"}
+    assert evaluations[0].value != evaluations[1].value

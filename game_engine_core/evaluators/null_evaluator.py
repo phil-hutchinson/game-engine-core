@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from typing import Any
 
 from ..models.position_evaluation import PositionEvaluation
@@ -16,10 +17,13 @@ class NullEvaluator[TPly: GamePly, TPosition: GamePosition[Any]]:
     begins exploiting.
     """
 
-    def evaluate_position(self, position: TPosition) -> PositionEvaluation:
-        legal_plies = position.legal_plies
-        uniform_prior = 1.0 / len(legal_plies) if legal_plies else 0.0
-        return PositionEvaluation(
-            value=0.0,
-            policy={str(ply): uniform_prior for ply in legal_plies},
-        )
+    def evaluate_positions(self, positions: Sequence[TPosition]) -> Sequence[PositionEvaluation]:
+        evaluations: list[PositionEvaluation] = []
+        for position in positions:
+            legal_plies = position.legal_plies
+            uniform_prior = 1.0 / len(legal_plies) if legal_plies else 0.0
+            evaluations.append(PositionEvaluation(
+                value=0.0,
+                policy={str(ply): uniform_prior for ply in legal_plies},
+            ))
+        return evaluations
