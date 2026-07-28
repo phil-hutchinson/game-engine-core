@@ -2,6 +2,8 @@
 
 A game-agnostic Python engine framework for building board and turn-based games with pluggable AI players. Provides the core abstractions for game state, player protocols, and search-based AI — including a Monte Carlo Tree Search (MCTS) engine with PUCT selection and a policy/value head interface ready for neural network integration.
 
+> **Alpha.** The API is not stable. Breaking changes — to protocols, models, and engine behaviour — land in any release, including patch-level version bumps, and are not signalled by the version number. Pin an exact commit if you need stability.
+
 ## What's in the box
 
 | Package | Purpose |

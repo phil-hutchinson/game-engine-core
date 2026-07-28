@@ -5,11 +5,14 @@ driven by the shipped engine — so it is tested here rather than in the package
 
 The win-in-one case is a fast smoke test but a weak strength signal: a search
 weak enough to blunder in one position out of eight still passes it. The
-full-game test below is the strength check, scoring every engine decision against
-a negamax solver rather than only the outcome.
+full-game test below is the strength check, playing out all 72 two-ply openings
+and scoring every engine decision against a negamax solver rather than only the
+outcome — roughly 210 decisions, over openings that are drawn and openings the
+engine must convert to a win.
 """
 
 from functools import cache
+from itertools import permutations
 
 import pytest
 
@@ -22,10 +25,16 @@ TicTacToeMCTSEngine = MCTSEngine[
     TicTacToePly, TicTacToePosition, NullEvaluator[TicTacToePly, TicTacToePosition]
 ]
 
-# Above the strength cliff with margin: the engine blunders against perfect play
-# at 500 iterations and is clean from 1000 up (measured over every position
-# reachable in five plies, story 21 step 3).
+# Above the strength cliff. Measured over every position reachable in five plies
+# (story 21 step 3), blunders persist at 1000 iterations (0.3%) and 2000 is the
+# first clean budget. The opening sweep below is easier — it is clean from 1000
+# up and blunders 8 times in 228 decisions at 500 — so 2000 also carries margin.
 STRENGTH_ITERATIONS = 2000
+
+# Every distinct position two plies in: nine first plies by eight replies. Each
+# is a separate parametrised game, so the sweep covers openings that are still
+# drawn and openings where the reply lost and the engine has to convert.
+TWO_PLY_OPENINGS = list(permutations(range(1, 10), 2))
 
 
 def _engine(iterations: int) -> TicTacToeMCTSEngine:
@@ -70,18 +79,27 @@ def test_engine_finds_the_win_in_one() -> None:
     assert position.apply_ply(chosen).outcome == -1
 
 
-@pytest.mark.parametrize("engine_seat", [1, -1])
-def test_engine_never_blunders_against_perfect_play(engine_seat: int) -> None:
+@pytest.mark.parametrize(("first_ply", "reply"), TWO_PLY_OPENINGS)
+def test_engine_never_blunders_against_perfect_play(first_ply: int, reply: int) -> None:
     """The real strength check: a correct TicTacToe engine cannot be beaten.
 
     Every engine decision is scored against the solver, not just the result, so
-    a search that stumbles into a draw by luck still fails. Both seats are
-    covered because moving first and second exercise different search shapes:
-    P1 must find a line that keeps the draw available, P2 must refute one.
+    a search that stumbles into the right outcome by luck still fails. Playing
+    from all 72 two-ply openings rather than deepening one line is what gives
+    this coverage: a single game scores about three decisions along one fixed
+    path, which a strength regression can easily miss, while the sweep scores
+    every decision the engine makes from every distinct position two plies in.
     """
     engine = _engine(STRENGTH_ITERATIONS)
-    position = TicTacToePosition.new_game()
+    opening = TicTacToePosition.new_game()
+    for square in (first_ply, reply):
+        opening = opening.apply_ply(TicTacToePly(square))
 
+    # The engine takes the seat to move at the opening — always P1, since two
+    # plies have been played — and meets a perfect opponent, so it is never
+    # handed a free win and must find the value of the opening itself.
+    engine_seat = opening.active_player_id
+    position = opening
     while position.outcome is None:
         if position.active_player_id == engine_seat:
             ply = engine.select_ply(position)
@@ -90,7 +108,6 @@ def test_engine_never_blunders_against_perfect_play(engine_seat: int) -> None:
                 f"value-preserving plies were {sorted(_perfect_plies(position))}"
             )
         else:
-            # A perfect opponent, so the engine is never handed a free win.
             ply = next(
                 p for p in position.legal_plies if str(p) in _perfect_plies(position)
             )
@@ -98,6 +115,9 @@ def test_engine_never_blunders_against_perfect_play(engine_seat: int) -> None:
         engine.observe_ply(position, ply, new_position)
         position = new_position
 
-    # Perfect play by both sides draws. Stated in absolute terms: the outcome is
-    # relative to the player to move at the final position, and 0 is 0 either way.
-    assert position.outcome == 0
+    # Neither side blundered, so the game ends on the opening's solved value.
+    # `outcome` is relative to the player to move at the final position, so it
+    # is restated from the engine's seat before comparing.
+    assert position.outcome * position.active_player_id * engine_seat == _negamax(
+        opening.board, engine_seat
+    )
