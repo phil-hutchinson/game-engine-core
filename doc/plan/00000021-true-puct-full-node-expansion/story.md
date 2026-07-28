@@ -4,10 +4,9 @@ Part of the **Fleet Play** epic (#20).
 
 ## Goal
 
-Replace the current one-child-per-iteration expansion with **AlphaZero-style
-full expansion**: on first reaching a leaf, evaluate it once, attach *all* of
-its children at once with their priors, and let PUCT govern every descent from
-then on.
+Replace the current one-child-per-iteration expansion with **full expansion**: 
+on first reaching a leaf, evaluate it once, attach *all* of its children at once
+with their priors, and let PUCT govern every descent from then on.
 
 One MCTS iteration becomes:
 
@@ -72,4 +71,14 @@ story (#23).
 - No change to **retention policy**. The retained tree keeps its current
   semantics; the `observe_ply` simplification above falls out naturally and does
   not decide the open retention question (epic backlog P5).
-- No change to the evaluator protocol (that is #22).
+- No change to the evaluator protocol (that is #22). **Amended during
+  implementation:** `PositionEvaluator.evaluate_position` is untouched, but one
+  contract change was pulled forward out of #22 — `PositionEvaluation.policy`
+  became a required field rather than `None`-able. Under full expansion every
+  child needs a prior at construction, on every path, so an optional policy is a
+  false option: something has to invent the numbers regardless. The
+  implementation plan's Decisions section puts that in the evaluator
+  (`NullEvaluator` now returns a uniform policy) instead of a fallback in the
+  engine's hot path, and records the full rationale. This is a breaking change
+  for out-of-repo evaluators — `PositionEvaluation(value=0.0)` now raises
+  `TypeError` — carried by the README's alpha notice rather than a version bump.

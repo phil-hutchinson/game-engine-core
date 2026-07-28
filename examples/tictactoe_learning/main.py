@@ -26,7 +26,12 @@ def _make_neural_engine(temperature: float = 0.0) -> MCTSEngine[TicTacToePly, Ti
     model = TicTacToeMLP()
     model.load_state_dict(torch.load(WEIGHTS_PATH, weights_only=True))
     evaluator = TicTacToeNNEvaluator(model=model)
-    return MCTSEngine(evaluator=evaluator, iterations=10, temperature=temperature)
+    # 200 matches the self-play and heuristic budgets. The previous 10 dated from
+    # when the root was never evaluated, so those iterations were spent expanding
+    # one child each and the policy head went unused at play time; it is no longer
+    # a budget that makes sense — measured against a solver, 10 blunders in 36% of
+    # positions where 200 blunders in 3.7%, at ~30ms per ply.
+    return MCTSEngine(evaluator=evaluator, iterations=200, temperature=temperature)
 
 
 def make_player(choice: str, symbol: str, ui: TicTacToeUI, render_before_ply: bool, temperature: float):

@@ -3,7 +3,7 @@
 Each iteration plays a batch of self-play games with the current network, then runs a
 few epochs of gradient descent over the resulting samples. Because self-play and
 training share one model instance, every iteration generates data with a stronger
-network than the last (the AlphaZero loop, scaled down for TicTacToe).
+network than the last (a self-play reinforcement loop, scaled down for TicTacToe).
 
 Usage:
     python -m examples.tictactoe_learning.train
