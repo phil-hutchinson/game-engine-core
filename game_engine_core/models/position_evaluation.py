@@ -10,7 +10,7 @@ class PositionEvaluation:
     """Value head output: position evaluation in [-1.0, 1.0] from the active player's perspective."""
 
     policy: Mapping[str, float]
-    """Policy head output: prior probabilities over legal moves, keyed by str(ply).
+    """Policy head output: prior probabilities over legal plies, keyed by str(ply).
 
     Required, and must contain an entry for every legal ply of the evaluated
     position — MCTS expands a leaf by attaching all of its children at once, and

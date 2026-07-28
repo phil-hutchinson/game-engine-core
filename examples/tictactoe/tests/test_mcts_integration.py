@@ -13,6 +13,7 @@ engine must convert to a win.
 
 from functools import cache
 from itertools import permutations
+from typing import Literal
 
 import pytest
 
@@ -41,25 +42,31 @@ def _engine(iterations: int) -> TicTacToeMCTSEngine:
     return MCTSEngine(evaluator=NullEvaluator(), iterations=iterations)
 
 
+def _opponent(player: Literal[1, -1]) -> Literal[1, -1]:
+    """Negation that keeps the seat type, which `-player` would widen to int."""
+    return -1 if player == 1 else 1
+
+
 @cache
-def _negamax(board: Board, player: int) -> int:
+def _negamax(board: Board, player: Literal[1, -1]) -> int:
     """Game-theoretic value of the position, from the mover's perspective."""
-    position = TicTacToePosition(board, player)  # type: ignore[arg-type]
+    position = TicTacToePosition(board, player)
     if position.outcome is not None:
         return position.outcome
     return max(
-        -_negamax(position.apply_ply(ply).board, -player)
+        -_negamax(position.apply_ply(ply).board, _opponent(player))
         for ply in position.legal_plies
     )
 
 
 def _perfect_plies(position: TicTacToePosition) -> set[str]:
     """Every ply that preserves the value of the position — the non-blunders."""
-    best = _negamax(position.board, position.active_player_id)
+    mover = position.active_player_id
+    best = _negamax(position.board, mover)
     return {
         str(ply)
         for ply in position.legal_plies
-        if -_negamax(position.apply_ply(ply).board, -position.active_player_id) == best
+        if -_negamax(position.apply_ply(ply).board, _opponent(mover)) == best
     }
 
 

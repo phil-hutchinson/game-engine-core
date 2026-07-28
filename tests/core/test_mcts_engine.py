@@ -146,6 +146,17 @@ def test_first_iteration_evaluates_the_root_and_attaches_every_child() -> None:
     assert [child.visits for child in root.children] == [0, 0]
 
 
+def test_zero_visit_root_children_are_ranked_by_prior() -> None:
+    # A budget too small to descend past the root leaves every child at 0 visits,
+    # where a plain visit-count max returns whichever ply is first in legal order
+    # ("1" here) and ignores the priors the iteration just computed. The tie
+    # breaks on prior instead, so the chosen ply follows the policy rather than
+    # the order the plies happened to be enumerated in.
+    engine, _ = _policy_engine({"1": 0.25, "2": 0.75}, iterations=1)
+
+    assert str(engine.select_ply(NimPosition(pile=5))) == "2"
+
+
 def test_a_dominant_prior_is_reselected_while_its_sibling_stays_unvisited() -> None:
     # The point of true PUCT. An unvisited child scores on its exploration term
     # alone, which is proportional to its prior, so a 0.99-prior ply is taken

@@ -78,6 +78,10 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
 
         new_root = next((node for node in self._root_node.children if str(node.ply_from_parent) == str(ply)), None)
         if new_root is None:
+            # Unreachable through legal play against a searched root: full
+            # expansion gives every legal ply a child. Only a ply the tree never
+            # saw — an illegal one, or any ply if the root was never searched —
+            # lands here, and the tree is discarded rather than mis-rooted.
             self._root_node = None
             return
 
@@ -96,6 +100,12 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
         Expansion attaches a child per legal ply, so plies the search never descended into
         are present with 0 visits and thus 0 probability. It is used as the policy training
         target during self-play data collection.
+
+        Which plies land at exactly 0 is a function of the iteration budget against the
+        branching factor: PUCT is free to leave a low-prior ply unvisited at any budget,
+        where round-robin expansion once guaranteed every child a visit. Callers collecting
+        training data should size iterations well above the number of legal plies, since a
+        0 here is a hard zero in a cross-entropy policy target.
 
         Returns:
             A tuple of (selected_ply, policy) where policy maps str(ply) to probability
@@ -192,8 +202,8 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
             try:
                 prior = policy[ply_key]
             except KeyError:
-                raise ValueError(f"Policy missing entry for move '{ply_key}'") from None
-            new_position = node.position.apply_ply(legal_ply) # lazy would be ideal
+                raise ValueError(f"Policy missing entry for ply '{ply_key}'") from None
+            new_position = node.position.apply_ply(legal_ply)
             children.append(MCTSNode(
                 position=new_position,
                 parent=node,
@@ -215,25 +225,30 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
             value = -value
 
     def _select_best_ply(self, root: MCTSNode[TPosition, TPly]) -> TPly:
-        """Select move with highest visit count."""
+        """Select ply with highest visit count, breaking ties on prior.
+
+        The tie-break only bites when no child has been visited — an expanded
+        root with a budget too small to descend past it — where it returns the
+        highest-prior ply instead of the first one in legal order.
+        """
         if not root.children:
             plies = list(root.position.legal_plies)
             if not plies:
-                raise RuntimeError("No available moves - position should have been treated as terminal.")
+                raise RuntimeError("No available plies - position should have been treated as terminal.")
             return random.choice(plies)
 
-        best_child = max(root.children, key=lambda child: child.visits)
+        best_child = max(root.children, key=lambda child: (child.visits, child.prior))
         assert best_child.ply_from_parent is not None
         return best_child.ply_from_parent
 
     def _select_best_ply_with_temperature(self, root: MCTSNode[TPosition, TPly], temperature: float) -> TPly:
-        """Select move proportionally to visit counts, scaled by temperature."""
+        """Select ply proportionally to visit counts, scaled by temperature."""
         if not root.children:
             if self.verbose:
                 print('No children. Choosing randomly.')
             plies = list(root.position.legal_plies)
             if not plies:
-                raise RuntimeError("No available moves - position should have been treated as terminal.")
+                raise RuntimeError("No available plies - position should have been treated as terminal.")
             return random.choice(plies)
 
         visit_counts = [child.visits for child in root.children]
@@ -259,7 +274,7 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
                 key=lambda x: x[3], reverse=True
             )
             parts = [f"({ply}, {v}, {s}, {pct})" for ply, v, s, _, pct in combined]
-            print(f"Move analysis (ply, visits, score, probability): [{', '.join(parts)}]")
+            print(f"Ply analysis (ply, visits, score, probability): [{', '.join(parts)}]")
 
         rand_val = random.random()
         cumulative = 0.0
