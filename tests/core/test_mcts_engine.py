@@ -5,6 +5,8 @@ the search a known-correct answer. The null evaluator (value 0, no policy) keeps
 all signal coming from terminal outcomes, which is exactly what these tests pin.
 """
 
+from collections.abc import Sequence
+
 import pytest
 
 from game_engine_core.engines.mcts_engine import MCTSEngine, MCTSNode
@@ -118,9 +120,9 @@ class _FixedPolicyEvaluator:
         self._policy = policy
         self.calls = 0
 
-    def evaluate_position(self, position: NimPosition) -> PositionEvaluation:
+    def evaluate_positions(self, positions: Sequence[NimPosition]) -> Sequence[PositionEvaluation]:
         self.calls += 1
-        return PositionEvaluation(value=0.0, policy=dict(self._policy))
+        return [PositionEvaluation(value=0.0, policy=dict(self._policy)) for _ in positions]
 
 
 def _policy_engine(
@@ -200,8 +202,8 @@ def test_terminal_leaves_are_scored_from_their_outcome_without_evaluating() -> N
 class _IncompletePolicyEvaluator:
     """Evaluator whose policy omits a legal ply — a contract violation."""
 
-    def evaluate_position(self, position: NimPosition) -> PositionEvaluation:
-        return PositionEvaluation(value=0.0, policy={"1": 1.0})
+    def evaluate_positions(self, positions: Sequence[NimPosition]) -> Sequence[PositionEvaluation]:
+        return [PositionEvaluation(value=0.0, policy={"1": 1.0}) for _ in positions]
 
 
 def test_policy_missing_a_legal_ply_raises() -> None:

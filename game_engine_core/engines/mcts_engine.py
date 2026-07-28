@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from ..game.batch_position_processor import BatchPositionProcessor
 from ..protocols.game_ply import GamePly
 from ..protocols.game_position import GamePosition
 from ..protocols.position_evaluator import PositionEvaluator
@@ -55,11 +56,19 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
 
     _root_node: MCTSNode[TPosition, TPly] | None
 
-    def __init__(self, evaluator: TEvaluator, iterations: int = 1_000, verbose: bool = False, temperature: float = 0.0):
+    def __init__(
+        self,
+        evaluator: TEvaluator,
+        iterations: int = 1_000,
+        verbose: bool = False,
+        temperature: float = 0.0,
+        batch_ops: BatchPositionProcessor[TPly, TPosition] | None = None,
+    ):
         self.evaluator = evaluator
         self.iterations = iterations
         self.verbose = verbose
         self._temperature = temperature
+        self._batch_ops = batch_ops if batch_ops is not None else BatchPositionProcessor()
         self._root_node = None
 
     def select_ply(self, game_position: TPosition) -> TPly:
@@ -145,7 +154,7 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
             # No counts to normalise: either the root was never expanded, or it
             # was expanded but no iteration descended past it. Only this branch
             # needs the legal plies, since an unexpanded root has no children.
-            legal_plies = list(root.position.legal_plies)
+            legal_plies = list(self._batch_ops.legal_plies([root.position])[0])
             return {str(ply): 1.0 / len(legal_plies) for ply in legal_plies}
         return {k: v / total for k, v in child_visits.items()}
 
@@ -159,7 +168,7 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
         """
         selected_node = self._select_leaf(root)
 
-        outcome = selected_node.position.outcome
+        outcome = self._batch_ops.outcomes([selected_node.position])[0]
         if outcome is not None:
             value = float(outcome)
         else:
@@ -187,12 +196,16 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
         The policy is consumed here and not retained: a prior is only ever read
         at child construction. Evaluators must supply one covering every legal
         ply (see PositionEvaluation.policy) — the engine has no uniform default.
-        """
-        assert node.position.outcome is None
 
-        evaluation = self.evaluator.evaluate_position(node.position)
+        The caller is responsible for only reaching here with a non-terminal
+        leaf: _mcts_iteration establishes that from the outcome it already has.
+        Re-asserting it would mean a second trip through batch_ops for a fact
+        one frame up already knows — free when outcome was a property read, not
+        free now that it is a seam call a game may vectorise.
+        """
+        evaluation = self.evaluator.evaluate_positions([node.position])[0]
         policy = evaluation.policy
-        legal_plies: Sequence[TPly] = node.position.legal_plies
+        legal_plies: Sequence[TPly] = self._batch_ops.legal_plies([node.position])[0]
 
         # Build the children before attaching any, so an incomplete policy leaves
         # the node an unexpanded leaf rather than a half-expanded one.
@@ -203,7 +216,7 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
                 prior = policy[ply_key]
             except KeyError:
                 raise ValueError(f"Policy missing entry for ply '{ply_key}'") from None
-            new_position = node.position.apply_ply(legal_ply)
+            new_position = self._batch_ops.apply_plies([node.position], [legal_ply])[0]
             children.append(MCTSNode(
                 position=new_position,
                 parent=node,
@@ -232,7 +245,7 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
         highest-prior ply instead of the first one in legal order.
         """
         if not root.children:
-            plies = list(root.position.legal_plies)
+            plies = list(self._batch_ops.legal_plies([root.position])[0])
             if not plies:
                 raise RuntimeError("No available plies - position should have been treated as terminal.")
             return random.choice(plies)
@@ -246,7 +259,7 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
         if not root.children:
             if self.verbose:
                 print('No children. Choosing randomly.')
-            plies = list(root.position.legal_plies)
+            plies = list(self._batch_ops.legal_plies([root.position])[0])
             if not plies:
                 raise RuntimeError("No available plies - position should have been treated as terminal.")
             return random.choice(plies)

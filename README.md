@@ -9,7 +9,7 @@ A game-agnostic Python engine framework for building board and turn-based games 
 | Package | Purpose |
 |---|---|
 | `game_engine_core.protocols` | Abstract interfaces: `GamePosition`, `GamePly`, `GameEngine`, `Player`, `PositionEvaluator`, `GameUI`, `GameLogging` |
-| `game_engine_core.game` | `StandardGame` — the main game loop wiring players, engine, and UI together |
+| `game_engine_core.game` | `StandardGame` — the main game loop wiring players, engine, and UI together; `BatchPositionProcessor` — the batch seam for position operations |
 | `game_engine_core.engines` | `MCTSEngine` (PUCT selection, configurable iterations, retains its search tree across plies), `RandomEngine` |
 | `game_engine_core.players` | `AIPlayer`, `HumanPlayer` |
 | `game_engine_core.evaluators` | `NullEvaluator` — uniform prior, used as a baseline |
@@ -45,10 +45,12 @@ See [`examples/tictactoe`](examples/tictactoe) for a complete working implementa
 1. Subclass `GamePosition` — represent your board state, enumerate legal moves, and report the outcome (with a reason) once the game ends.
 2. Subclass `GamePly` — represent a single move.
 3. Implement `GameLogging` — a text board rendering and a per-ply log annotation (`str(ply)` is a valid trivial annotation).
-4. Optionally subclass `PositionEvaluator` — plug in a heuristic or neural network to guide MCTS.
+4. Optionally implement `PositionEvaluator` — plug in a heuristic or neural network to guide MCTS. Its one method, `evaluate_positions`, takes a sequence of positions and returns one `PositionEvaluation` per position, index-aligned.
 5. Wire it together with `StandardGame`.
 
 The engine never touches game-specific logic. Everything game-specific lives behind the `GamePosition` and `PositionEvaluator` protocols.
+
+`MCTSEngine` and `SelfPlayCollector` reach positions only through a `BatchPositionProcessor` (constructor argument `batch_ops`, defaulting to a base instance whose `outcomes`/`legal_plies`/`apply_plies` loop the corresponding `GamePosition` member). It exists so a game whose positions can be scored several at once — vectorised legality, a single batched call into an external engine — can override just the method that benefits and inherit the rest; this is the expected steady state, not a fallback for simple games. `GamePosition` keeps its own scalar `outcome`/`legal_plies`/`apply_ply`, which is what lets a position implementation delegate one of them to a batch-of-one call into a `BatchPositionProcessor` it holds — but only into a method that processor actually overrides. Delegating into the inherited loop instead calls straight back into the same scalar property and recurses until the stack overflows; `BatchPositionProcessor.overridden_methods()` reports which methods a subclass overrode, so a delegating position can assert the assumption at construction rather than discovering it mid-search.
 
 The examples ship with their own pytest suites ([`examples/tictactoe/tests`](examples/tictactoe/tests), [`examples/tictactoe_learning/tests`](examples/tictactoe_learning/tests)) that double as a model for testing your own game implementation — position legality and outcome checks, evaluator sanity tests, and an engine-vs-position integration test.
 
@@ -60,7 +62,7 @@ The policy is **required** and must cover every legal ply of the position, becau
 
 Within a game, `MCTSEngine` retains its search tree between plies: `StandardGame` reports every applied ply back to the engine via `observe_ply`, and the engine re-roots onto the corresponding child instead of rebuilding from scratch, carrying forward whatever the search accumulated below that ply — visit counts, cached evaluations, and priors. A ply the search never descended into carries forward its prior alone, since expansion created the child but nothing below it exists yet. This is most valuable with a neural network evaluator, where re-evaluating positions is the dominant cost. Retention is per-game — `StandardGame` resets it at the start of each game, so reusing a player/engine across games (as `Tournament` does) never leaks a tree between games. `select_ply_with_policy`, the self-play data-collection path, always builds a fresh tree and is unaffected.
 
-`game_engine_learning` provides self-play loops, training infrastructure, and a `NeuralNetworkEvaluator` base class. Subclass `NeuralNetworkEvaluator` and implement `encode_position` and `decode_policy` — the base class handles the forward pass and assembles the `PositionEvaluation`. See [`examples/tictactoe_learning`](examples/tictactoe_learning) for a complete example.
+`game_engine_learning` provides self-play loops, training infrastructure, and a `NeuralNetworkEvaluator` base class. Subclass `NeuralNetworkEvaluator` and implement `encode_positions` (positions → one stacked input tensor) and `decode_policies` (policy logits + positions → one probability distribution per position) — the base class stacks the batch, runs a single forward pass in eval mode, and assembles the `PositionEvaluation`s. See [`examples/tictactoe_learning`](examples/tictactoe_learning) for a complete example.
 
 ## Tournaments
 

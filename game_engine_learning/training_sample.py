@@ -8,7 +8,7 @@ from torch import Tensor
 @dataclass(frozen=True)
 class TrainingSample:
     encoded_position: Tensor
-    """Encoded board state — output of NeuralNetworkEvaluator.encode_position."""
+    """Encoded board state — one row of a NeuralNetworkEvaluator.encode_positions batch."""
 
     target_value: float
     """Game outcome from the active player's perspective: 1.0 win, 0.0 draw, -1.0 loss.

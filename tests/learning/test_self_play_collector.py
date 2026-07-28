@@ -8,6 +8,7 @@ player who would move next (the loser here), so the last recorded step — made 
 the *other* player — gets -final_outcome, alternating backwards from there.
 """
 
+from collections.abc import Sequence
 from typing import Any
 
 from game_engine_core.engines.mcts_engine import MCTSEngine
@@ -60,9 +61,11 @@ def test_policy_transform_reframes_targets_using_the_position() -> None:
     # capture. Over the forced pile-3 line the mover alternates 1, -1, 1, so the
     # re-keyed distributions differ per step in a way only the position reveals.
     def prefix_with_mover(
-        position: NimPosition, policy: dict[str, float]
-    ) -> dict[str, float]:
-        return {f"{position.active_player_id}:{ply}": p for ply, p in policy.items()}
+        positions: Sequence[NimPosition], policies: Sequence[dict[str, float]]
+    ) -> Sequence[dict[str, float]]:
+        assert len(positions) == len(policies) == 1
+        position, policy = positions[0], policies[0]
+        return [{f"{position.active_player_id}:{ply}": p for ply, p in policy.items()}]
 
     collector = SelfPlayCollector(
         evaluator=NimNNEvaluator(model=NimMLP()),
@@ -77,6 +80,39 @@ def test_policy_transform_reframes_targets_using_the_position() -> None:
         {"-1:1": 1.0},
         {"1:1": 1.0},
     ]
+
+
+def test_policy_transform_receives_positions_and_policies_paired_by_index() -> None:
+    # The collector calls the transform batch-of-one, but the signature itself
+    # is plural: the transform must receive N positions and N policies aligned
+    # by index, and a transform that re-keys per index must land its result on
+    # the matching sample rather than, say, the first index for every call.
+    received: list[tuple[Sequence[NimPosition], Sequence[dict[str, float]]]] = []
+
+    def record_and_tag_by_index(
+        positions: Sequence[NimPosition], policies: Sequence[dict[str, float]]
+    ) -> Sequence[dict[str, float]]:
+        received.append((positions, policies))
+        return [
+            {f"row{i}:{ply}": p for ply, p in policy.items()}
+            for i, policy in enumerate(policies)
+        ]
+
+    collector = SelfPlayCollector(
+        evaluator=NimNNEvaluator(model=NimMLP()),
+        engine_factory=lambda: MCTSEngine(evaluator=NullEvaluator(), iterations=10),
+        position_factory=lambda: NimPosition(pile=3, takes=(1,)),
+        policy_transform=record_and_tag_by_index,
+    )
+    samples = collector.collect(n_games=1)
+
+    assert len(received) == 3  # one call per step of the pile-3 forced line
+    for positions, policies in received:
+        assert len(positions) == len(policies) == 1
+    # Each call's single position/policy pair lands at index 0 — the transform's
+    # "row0" tag on every call confirms the re-keyed result reaches its own
+    # sample rather than being dropped or misrouted.
+    assert all(sample.target_policy == {"row0:1": 1.0} for sample in samples)
 
 
 def test_collect_accumulates_across_games() -> None:

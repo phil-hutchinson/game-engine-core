@@ -1,3 +1,5 @@
+from collections.abc import Sequence
+
 from game_engine_core.models.position_evaluation import PositionEvaluation
 
 from .tictactoe_position import WINNING_LINES, Board, TicTacToePosition
@@ -41,27 +43,31 @@ def _score_move(board: Board, player: int, idx: int) -> float:
     return 0.1
 
 
+def _evaluate_position(position: TicTacToePosition) -> PositionEvaluation:
+    board = position.board
+    me = position.active_player_id
+    opp = -me
+
+    my_threats = _count_threats(board, me)
+    opp_threats = _count_threats(board, opp)
+
+    score = 0.0
+    score += 0.6 if my_threats >= 2 else (0.25 if my_threats == 1 else 0.0)
+    score -= 0.6 if opp_threats >= 2 else (0.25 if opp_threats == 1 else 0.0)
+
+    score += 0.05 if board[4] == me else (-0.05 if board[4] == opp else 0.0)
+    for i in (0, 2, 6, 8):
+        score += 0.025 if board[i] == me else (-0.025 if board[i] == opp else 0.0)
+
+    legal = position.legal_plies
+    scores = [_score_move(board, me, p.square - 1) for p in legal]
+    total = sum(scores)
+    policy = {str(p): s / total for p, s in zip(legal, scores, strict=True)}
+
+    return PositionEvaluation(value=max(-1.0, min(1.0, score)), policy=policy)
+
+
 class TicTacToeHeuristicEvaluator:
 
-    def evaluate_position(self, position: TicTacToePosition) -> PositionEvaluation:
-        board = position.board
-        me = position.active_player_id
-        opp = -me
-
-        my_threats = _count_threats(board, me)
-        opp_threats = _count_threats(board, opp)
-
-        score = 0.0
-        score += 0.6 if my_threats >= 2 else (0.25 if my_threats == 1 else 0.0)
-        score -= 0.6 if opp_threats >= 2 else (0.25 if opp_threats == 1 else 0.0)
-
-        score += 0.05 if board[4] == me else (-0.05 if board[4] == opp else 0.0)
-        for i in (0, 2, 6, 8):
-            score += 0.025 if board[i] == me else (-0.025 if board[i] == opp else 0.0)
-
-        legal = position.legal_plies
-        scores = [_score_move(board, me, p.square - 1) for p in legal]
-        total = sum(scores)
-        policy = {str(p): s / total for p, s in zip(legal, scores, strict=True)}
-
-        return PositionEvaluation(value=max(-1.0, min(1.0, score)), policy=policy)
+    def evaluate_positions(self, positions: Sequence[TicTacToePosition]) -> Sequence[PositionEvaluation]:
+        return [_evaluate_position(position) for position in positions]

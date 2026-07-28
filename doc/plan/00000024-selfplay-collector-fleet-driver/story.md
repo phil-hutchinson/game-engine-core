@@ -17,15 +17,18 @@ alternation over each game's reversed step records). Only the driving changes.
 
 ## The fleet loop
 
-1. **Bootstrap** N games from the position factory (bulk where the factory
-   supports it), each with its own running list of step records.
+1. **Bootstrap** N games by calling the position factory N times — it stays
+   scalar (#22 does not widen it: a game's starting position is a per-game
+   concern, not a batch one), each with its own running list of step records.
 2. Each fleet-turn, hand the engine the current position of every *live* game,
    in slot order, via `select_plies_with_policy(positions)` (#23), and get back
    one `(ply, policy)` per game.
 3. For each live game: capture its step (batched `encode_positions` and batched
-   `policy_transform`, #22), then apply its ply.
-4. **Drop** any game that has reached a terminal position; back-fill its values
-   and emit its `TrainingSample`s.
+   `policy_transform`, #22), then apply its ply (batched via
+   `batch_ops.apply_plies`, #22).
+4. **Drop** any game that has reached a terminal position (via
+   `batch_ops.outcomes`, #22); back-fill its values and emit its
+   `TrainingSample`s.
 5. Repeat until all games are done.
 
 Game identity is the slot index throughout: positions go in in slot order, plies
@@ -54,9 +57,11 @@ through the tail (P3) — are deferred.
 ## Scope
 
 - Replace the sequential `collect` loop with the fleet loop above.
-- Bulk-bootstrap N starting positions from the position factory.
+- Bootstrap N starting positions by calling the (scalar) position factory N
+  times.
 - Drive per-turn search through `select_plies_with_policy`, aligned by slot.
-- Batch capture: `encode_positions` and the batched `policy_transform`.
+- Batch capture: `encode_positions` and the batched `policy_transform`; batch
+  the terminal test and ply application through `batch_ops`.
 - Per-game termination, value back-fill, and `TrainingSample` emission unchanged
   in meaning, adapted to games finishing at different turns.
 
