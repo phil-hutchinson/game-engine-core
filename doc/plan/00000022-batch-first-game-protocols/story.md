@@ -152,7 +152,11 @@ carries.
 - No `GamePosition` changes, and therefore none to `StandardGame`,
   `RandomEngine`, the players, the UI or the tournament runner.
 - No behaviour change in `MCTSEngine`: it routes existing single-game work
-  through the batch seam at N = 1. The wave itself is #23.
+  through the batch seam at N = 1. The wave itself is #23. This includes
+  expansion, which issues one batch-of-one `apply_plies` call per child rather
+  than a single call of width B — the width-B call is available without the
+  wave and is behaviour-identical, but widening any call is #23's business, not
+  this story's (peer review #3).
 - No bulk position factory. Bootstrapping N starting positions happens once per
   `collect()`, not once per wave, so `position_factory` stays as it is (#24).
 - The fleet engine and driver that consume these (issues #23, #24) are separate.

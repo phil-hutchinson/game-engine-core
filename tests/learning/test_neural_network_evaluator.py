@@ -2,6 +2,7 @@
 
 import pytest
 import torch
+from torch import Tensor
 
 from tests.core.nim_fixture import NimPosition
 
@@ -89,3 +90,45 @@ def test_decode_policies_pairs_each_row_with_its_own_position() -> None:
 
     assert set(policies[0]) == {"1"}
     assert set(policies[1]) == {"1", "2"}
+
+
+def test_empty_batch_returns_no_evaluations_without_reaching_the_model() -> None:
+    # The fleet wave calls evaluate_positions with the non-terminal subset of a
+    # wave's leaves, which is empty whenever every selected leaf is terminal.
+    # Reaching the model with it would raise (torch cannot stack an empty list),
+    # so the base class must short-circuit — matching BatchPositionProcessor,
+    # whose three methods are all defined on an empty batch.
+    class _ExplodingModel(NimMLP):
+        def forward(self, x: Tensor) -> tuple[Tensor, Tensor]:
+            raise AssertionError("model must not be called for an empty batch")
+
+    assert NimNNEvaluator(model=_ExplodingModel()).evaluate_positions([]) == []
+
+
+class _FlatValueHeadMLP(NimMLP):
+    """Value head returning (N,) rather than the required (N, 1)."""
+
+    def forward(self, x: Tensor) -> tuple[Tensor, Tensor]:
+        value, policy_logits = super().forward(x)
+        return value.squeeze(-1), policy_logits
+
+
+def test_value_output_of_the_wrong_shape_raises_naming_both_shapes() -> None:
+    # A (N,) value head is not merely an alternative layout: TrainingLoop's
+    # targets are (N, 1), so it would broadcast into a silently wrong loss.
+    # Caught here at inference, with a message naming what was expected and
+    # what arrived — rather than as "iteration over a 0-d tensor" at N == 1
+    # and no error at all above it.
+    evaluator = NimNNEvaluator(model=_FlatValueHeadMLP())
+
+    with pytest.raises(ValueError, match=r"shape \(2, 1\), got \(2,\)"):
+        evaluator.evaluate_positions([NimPosition(pile=5), NimPosition(pile=3)])
+
+
+def test_value_shape_check_applies_at_batch_of_one_too() -> None:
+    # The N == 1 case is where the old squeeze(-1) handling failed with an
+    # opaque TypeError, and it is the width every current call site uses.
+    evaluator = NimNNEvaluator(model=_FlatValueHeadMLP())
+
+    with pytest.raises(ValueError, match=r"shape \(1, 1\), got \(1,\)"):
+        evaluator.evaluate_positions([NimPosition(pile=5)])

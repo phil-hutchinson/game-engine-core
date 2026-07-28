@@ -73,6 +73,10 @@ a fleet method that holds all N trees at once. This is that method.
 - Implement the wave: per-wave leaf selection, terminal partition (via
   `batch_ops`), one batched `evaluate_positions`, scatter of values + full
   expansion (via `batch_ops`), per-tree backpropagation.
+- Widen expansion's successor construction. #22 left it as one batch-of-one
+  `apply_plies` call per child (its peer review #3); one leaf's B children are
+  already a batch without the wave, and across the fleet they collapse further
+  into a single call spanning every expanding leaf.
 - `select_ply` / `select_ply_with_policy` delegate to the plural forms at
   `N = 1`, keeping single-game behaviour identical.
 - Build fresh (bare) roots from the supplied positions on each call — no

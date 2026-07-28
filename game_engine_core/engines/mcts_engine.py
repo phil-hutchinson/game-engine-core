@@ -196,9 +196,13 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
         The policy is consumed here and not retained: a prior is only ever read
         at child construction. Evaluators must supply one covering every legal
         ply (see PositionEvaluation.policy) — the engine has no uniform default.
-        """
-        assert self._batch_ops.outcomes([node.position])[0] is None
 
+        The caller is responsible for only reaching here with a non-terminal
+        leaf: _mcts_iteration establishes that from the outcome it already has.
+        Re-asserting it would mean a second trip through batch_ops for a fact
+        one frame up already knows — free when outcome was a property read, not
+        free now that it is a seam call a game may vectorise.
+        """
         evaluation = self.evaluator.evaluate_positions([node.position])[0]
         policy = evaluation.policy
         legal_plies: Sequence[TPly] = self._batch_ops.legal_plies([node.position])[0]
