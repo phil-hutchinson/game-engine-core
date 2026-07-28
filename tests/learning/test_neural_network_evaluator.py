@@ -1,6 +1,7 @@
 """NeuralNetworkEvaluator base-class tests: the evaluate_positions contract."""
 
 import pytest
+import torch
 
 from tests.core.nim_fixture import NimPosition
 
@@ -39,3 +40,52 @@ def test_inference_runs_in_eval_mode_even_after_training_left_train_mode() -> No
 
     assert first.value == second.value
     assert first.policy == second.policy
+
+
+def test_inference_runs_in_eval_mode_on_a_genuine_batch() -> None:
+    # Same check as above, but with both positions passed to a single
+    # evaluate_positions call rather than two batch-of-one calls — pins eval
+    # mode on the batched forward pass itself, not just the interim loop it
+    # replaced. With dropout active and train mode leaking through, the two
+    # rows of one batched forward would pick up independent dropout masks and
+    # diverge even though the input rows are identical.
+    model = NimMLP(dropout=0.5)
+    evaluator = NimNNEvaluator(model=model)
+    model.train()
+
+    position = NimPosition(pile=5)
+    first, second = evaluator.evaluate_positions([position, position])
+
+    assert first.value == second.value
+    assert first.policy == second.policy
+
+
+def test_batched_evaluation_matches_elementwise_single_position_evaluation() -> None:
+    # The point of the batching: N positions through one evaluate_positions
+    # call must equal, elementwise, N separate batch-of-one calls.
+    evaluator = NimNNEvaluator(model=NimMLP())
+    positions = [NimPosition(pile=1), NimPosition(pile=5), NimPosition(pile=2)]
+
+    batched = evaluator.evaluate_positions(positions)
+    individually = [evaluator.evaluate_positions([position])[0] for position in positions]
+
+    for from_batch, from_single in zip(batched, individually, strict=True):
+        assert from_batch.value == pytest.approx(from_single.value)
+        assert from_batch.policy.keys() == from_single.policy.keys()
+        for key in from_batch.policy:
+            assert from_batch.policy[key] == pytest.approx(from_single.policy[key])
+
+
+def test_decode_policies_pairs_each_row_with_its_own_position() -> None:
+    # Two positions with different legal sets: a row/position mispairing would
+    # surface as a probability landing on a ply illegal for whichever position
+    # it actually got paired with (pile 1 permits only "1"; pile 5 permits
+    # "1" and "2").
+    evaluator = NimNNEvaluator(model=NimMLP())
+    positions = [NimPosition(pile=1), NimPosition(pile=5)]
+    logits = torch.tensor([[10.0, -10.0], [0.0, 0.0]])
+
+    policies = evaluator.decode_policies(logits, positions)
+
+    assert set(policies[0]) == {"1"}
+    assert set(policies[1]) == {"1", "2"}

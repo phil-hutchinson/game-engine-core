@@ -15,71 +15,69 @@ from game_engine_core.protocols.game_position import GamePosition
 class NeuralNetworkEvaluator[TPosition: GamePosition[Any]](ABC):
     """Abstract base class wrapping a PyTorch model as a PositionEvaluator.
 
-    Subclasses implement encode_position and decode_policy; this class handles
-    the forward pass and assembles the PositionEvaluation.
+    Subclasses implement encode_positions and decode_policies; this class runs
+    a single stacked forward pass and assembles the PositionEvaluations.
 
     The wrapped model's forward() must accept a batched input tensor of shape
-    (batch, *sample_shape) — where sample_shape is whatever encode_position
-    produces for a single position — and return (value_tensor, policy_logits),
-    each with a leading batch dimension. This matches how TrainingLoop feeds the
-    model; evaluate_positions currently loops a batch-of-one call per position,
-    so the model still never sees more than one row at a time here (a genuinely
-    stacked forward pass is a later step).
+    (N, *sample_shape) — where sample_shape is whatever encode_positions
+    produces per position — and return (value_tensor, policy_logits), each
+    with a leading batch dimension of size N. This matches how TrainingLoop
+    feeds the model: evaluate_positions and TrainingLoop both hand the model
+    one real batch, never a Python-level loop of batch-of-one calls.
     """
 
     def __init__(self, model: nn.Module):
         self._model = model
 
     @abstractmethod
-    def encode_position(self, position: TPosition) -> Tensor:
-        """Convert a game position into a tensor suitable for model input.
+    def encode_positions(self, positions: Sequence[TPosition]) -> Tensor:
+        """Convert N positions into one stacked tensor suitable for model input.
 
-        The tensor represents a single position without a batch dimension —
-        1-D for an MLP, multi-dimensional for a CNN, etc. Callers add the batch
-        dimension themselves (evaluate_positions currently wraps each sample in
-        a batch of size 1; TrainingLoop stacks samples into a batch). Values
-        should be encoded from the active player's perspective so the model
-        always reasons about "my pieces" vs "opponent pieces" regardless of
-        which player is moving.
+        Returns a tensor of shape (N, *sample_shape) — one row per position,
+        aligned by index — where sample_shape is 1-D for an MLP,
+        multi-dimensional for a CNN, etc. Values should be encoded from each
+        position's active player's perspective so the model always reasons
+        about "my pieces" vs "opponent pieces" regardless of which player is
+        moving.
 
         Args:
-            position: The current game position to encode.
+            positions: The positions to encode.
 
         Returns:
-            A tensor representation of the position for the model's forward pass.
+            A stacked tensor representation for the model's forward pass.
         """
         ...
 
     @abstractmethod
-    def decode_policy(self, policy_logits: Tensor, position: TPosition) -> dict[str, float]:
-        """Convert raw policy logits into a probability distribution over legal moves.
+    def decode_policies(
+        self, policy_logits: Tensor, positions: Sequence[TPosition]
+    ) -> Sequence[dict[str, float]]:
+        """Convert stacked policy logits into per-position probability distributions.
 
-        Implementations should mask illegal moves (typically by adding -inf to their
-        logits) before applying softmax, so that only legal moves receive non-zero
-        probability. The resulting probabilities must sum to 1.
+        Implementations should mask illegal moves (typically by adding -inf to
+        their logits) before applying softmax, so that only legal moves
+        receive non-zero probability. Each returned distribution must sum to 1.
 
         Args:
-            policy_logits: Raw unbounded output from the model's policy head —
-                one value per possible move in the game's full action space.
-            position: The position the logits were computed for. Implementations
-                that only need the legal moves read position.legal_plies; the
-                full position is available for anything else a decoding scheme
-                needs (e.g. position.active_player_id, to interpret logits laid
-                out from the active player's perspective).
+            policy_logits: Raw unbounded output from the model's policy head,
+                shape (N, *policy_shape) — row i is the logits for
+                positions[i].
+            positions: The positions the logits were computed for, aligned by
+                index with the rows of policy_logits. Implementations that
+                only need the legal moves read position.legal_plies; the full
+                position is available for anything else a decoding scheme
+                needs (e.g. position.active_player_id, to interpret logits
+                laid out from the active player's perspective).
 
         Returns:
-            A dict mapping str(ply) to probability for each legal ply.
+            A sequence of dicts, aligned by index with positions, each mapping
+            str(ply) to probability for that position's legal plies.
         """
         ...
 
     def evaluate_positions(self, positions: Sequence[TPosition]) -> Sequence[PositionEvaluation]:
-        # Interim: one batch-of-one forward pass per position. A genuinely
-        # stacked forward pass over the whole input is a later step.
-        return [self._evaluate_position(position) for position in positions]
-
-    def _evaluate_position(self, position: TPosition) -> PositionEvaluation:
-        # Encode the board state into a tensor the model can process.
-        encoded = self.encode_position(position)
+        # Encode all positions into one (N, *sample_shape) tensor.
+        encoded = self.encode_positions(positions)
 
         # Always run inference in eval mode, regardless of what state the caller
         # (e.g. TrainingLoop, which switches the shared model to train() and never
@@ -88,18 +86,18 @@ class NeuralNetworkEvaluator[TPosition: GamePosition[Any]](ABC):
 
         # Run the forward pass without building a gradient graph — we're doing
         # inference only, not training, so autograd tracking is unnecessary.
-        # unsqueeze(0) wraps the single sample in a batch of size 1, so the model
-        # sees the same (batch, …) shape here as it does in TrainingLoop.
         with torch.no_grad():
-            value_tensor, policy_logits = self._model(encoded.unsqueeze(0))
+            value_tensor, policy_logits = self._model(encoded)
 
-        # squeeze() removes the size-1 batch and value-head dimensions (shape
-        # (1, 1) → scalar tensor), then float() converts it to a plain Python float.
-        value = float(value_tensor.squeeze())
+        # squeeze(-1) removes only the size-1 value-head column (shape (N, 1) ->
+        # (N,)), leaving the batch dimension intact even when N == 1 — unlike a
+        # bare squeeze(), which would also collapse a batch of one.
+        values = [float(value) for value in value_tensor.squeeze(-1)]
 
-        # Convert raw logits to a masked probability distribution over legal moves.
-        # squeeze(0) drops the batch dimension so decode_policy receives logits for
-        # a single position, matching the unbatched shape encode_position produces.
-        policy = self.decode_policy(policy_logits.squeeze(0), position)
+        # Convert raw logits to masked probability distributions, one per position.
+        policies = self.decode_policies(policy_logits, positions)
 
-        return PositionEvaluation(value=value, policy=policy)
+        return [
+            PositionEvaluation(value=value, policy=policy)
+            for value, policy in zip(values, policies, strict=True)
+        ]

@@ -42,22 +42,30 @@ class NimMLP(nn.Module):
 
 
 class NimNNEvaluator(NeuralNetworkEvaluator[NimPosition]):
+    """Plain comprehension per method, in contrast to TicTacToeNNEvaluator's
+    genuinely vectorised encode_positions — Nim's input is trivial enough that
+    the loop-and-stack style costs nothing and needs no justification."""
 
-    def encode_position(self, position: NimPosition) -> Tensor:
-        return torch.tensor([float(position.pile)], dtype=torch.float32)
+    def encode_positions(self, positions: Sequence[NimPosition]) -> Tensor:
+        return torch.stack([
+            torch.tensor([float(position.pile)], dtype=torch.float32)
+            for position in positions
+        ])
 
-    def decode_policy(
-        self, policy_logits: Tensor, position: NimPosition
-    ) -> dict[str, float]:
-        legal_plies = position.legal_plies
-
-        # Mask to the legal columns, then softmax so probabilities sum to 1.
-        legal_logits = policy_logits[[ply.take - 1 for ply in legal_plies]]
-        probs = torch.softmax(legal_logits, dim=-1)
-        return {
-            str(ply): float(prob)
-            for ply, prob in zip(legal_plies, probs, strict=True)
-        }
+    def decode_policies(
+        self, policy_logits: Tensor, positions: Sequence[NimPosition]
+    ) -> Sequence[dict[str, float]]:
+        policies: list[dict[str, float]] = []
+        for row_logits, position in zip(policy_logits, positions, strict=True):
+            legal_plies = position.legal_plies
+            # Mask to the legal columns, then softmax so probabilities sum to 1.
+            legal_logits = row_logits[[ply.take - 1 for ply in legal_plies]]
+            probs = torch.softmax(legal_logits, dim=-1)
+            policies.append({
+                str(ply): float(prob)
+                for ply, prob in zip(legal_plies, probs, strict=True)
+            })
+        return policies
 
 
 def nim_policy_loss(

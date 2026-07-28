@@ -81,7 +81,7 @@ class SelfPlayCollector[TPly: GamePly, TPosition: GamePosition[Any]]:
         step_records: list[tuple[Tensor, dict[str, float]]] = []
 
         while position.outcome is None:
-            encoded = self._evaluator.encode_position(position)
+            encoded = self._evaluator.encode_positions([position])[0]
             ply, policy = engine.select_ply_with_policy(position)
             # Frame-correct the visit distribution while the position — and thus its
             # active_player_id — is still in scope. Without a transform the raw
