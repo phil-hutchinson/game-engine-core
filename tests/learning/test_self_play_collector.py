@@ -9,10 +9,13 @@ the *other* player — gets -final_outcome, alternating backwards from there.
 """
 
 from collections.abc import Callable, Sequence
-from typing import Any
+from typing import Any, Literal
+
+from torch import Tensor
 
 from game_engine_core.engines.mcts_engine import MCTSEngine
 from game_engine_core.evaluators.null_evaluator import NullEvaluator
+from game_engine_core.game.batch_position_processor import BatchPositionProcessor
 from game_engine_learning.self_play_collector import SelfPlayCollector
 from tests.core.nim_fixture import NimPly, NimPosition
 
@@ -207,6 +210,87 @@ def test_one_engine_serves_every_game_in_the_collect() -> None:
     collector.collect(n_games=3)
 
     assert len(engines) == 1
+
+
+class _WidthRecordingEvaluator(NimNNEvaluator):
+    """Records the width of every encode_positions call, then encodes as usual."""
+
+    def __init__(self, widths: list[int]):
+        super().__init__(model=NimMLP())
+        self._widths = widths
+
+    def encode_positions(self, positions: Sequence[NimPosition]) -> Tensor:
+        self._widths.append(len(positions))
+        return super().encode_positions(positions)
+
+
+class _WidthRecordingBatchProcessor(BatchPositionProcessor[NimPly, NimPosition]):
+    """Records the width of each seam call, then delegates to the base loop."""
+
+    def __init__(self, outcome_widths: list[int], apply_widths: list[int]):
+        self._outcome_widths = outcome_widths
+        self._apply_widths = apply_widths
+
+    def outcomes(self, positions: Sequence[NimPosition]) -> Sequence[Literal[1, 0, -1] | None]:
+        self._outcome_widths.append(len(positions))
+        return super().outcomes(positions)
+
+    def apply_plies(
+        self, positions: Sequence[NimPosition], plies: Sequence[NimPly]
+    ) -> Sequence[NimPosition]:
+        self._apply_widths.append(len(positions))
+        return super().apply_plies(positions, plies)
+
+
+class _WidthRecordingEngine(MCTSEngine[NimPly, NimPosition, Any]):
+    """Records the width of every fleet search, then searches as usual."""
+
+    def __init__(self, widths: list[int]):
+        super().__init__(evaluator=NullEvaluator(), iterations=10)
+        self._widths = widths
+
+    def select_plies_for_training(
+        self, positions: Sequence[NimPosition]
+    ) -> Sequence[tuple[NimPly, dict[str, float]]]:
+        self._widths.append(len(positions))
+        return super().select_plies_for_training(positions)
+
+
+def test_each_seam_is_called_once_per_turn_at_the_live_fleet_width() -> None:
+    # The point of the fleet: a turn is one call of width N through each seam, not N
+    # calls of width one. Piles 5, 3 and 4 take 5, 3 and 4 turns, so the fleet plays
+    # 5 turns and 12 plies in total — a width-one driver would show 12 calls of width
+    # 1 through every seam below, and the terminal test would be called 15 times.
+    search_widths: list[int] = []
+    encode_widths: list[int] = []
+    transform_widths: list[int] = []
+    outcome_widths: list[int] = []
+    apply_widths: list[int] = []
+
+    def record_transform_width(
+        positions: Sequence[NimPosition], policies: Sequence[dict[str, float]]
+    ) -> Sequence[dict[str, float]]:
+        transform_widths.append(len(positions))
+        return policies
+
+    collector = SelfPlayCollector(
+        evaluator=_WidthRecordingEvaluator(encode_widths),
+        engine_factory=lambda: _WidthRecordingEngine(search_widths),
+        position_factory=_piles(5, 3, 4),
+        policy_transform=record_transform_width,
+        batch_ops=_WidthRecordingBatchProcessor(outcome_widths, apply_widths),
+    )
+    collector.collect(n_games=3)
+
+    # Five turns, narrowing as the pile-3 game retires after turn 3 and the pile-4
+    # game after turn 4.
+    assert search_widths == [3, 3, 3, 2, 1]
+    assert encode_widths == search_widths
+    assert transform_widths == search_widths
+    assert apply_widths == search_widths
+    # One terminal test per turn plus the final one that empties the fleet, each
+    # covering the games still live at the top of that turn.
+    assert outcome_widths == [3, 3, 3, 3, 2, 1]
 
 
 def test_collect_accumulates_across_games() -> None:
