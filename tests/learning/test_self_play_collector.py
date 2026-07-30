@@ -8,7 +8,7 @@ player who would move next (the loser here), so the last recorded step — made 
 the *other* player — gets -final_outcome, alternating backwards from there.
 """
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Any
 
 from game_engine_core.engines.mcts_engine import MCTSEngine
@@ -28,6 +28,16 @@ def _collector(starting_pile: int) -> SelfPlayCollector[NimPly, NimPosition]:
         engine_factory=engine_factory,
         position_factory=lambda: NimPosition(pile=starting_pile, takes=(1,)),
     )
+
+
+def _piles(*starting_piles: int) -> Callable[[], NimPosition]:
+    """A position factory handing out a different starting pile per game, in slot order.
+
+    The factory stays scalar under the fleet — a game's starting position is a
+    per-game concern — so successive calls are what distinguish one slot from another.
+    """
+    remaining = iter(starting_piles)
+    return lambda: NimPosition(pile=next(remaining), takes=(1,))
 
 
 def test_target_values_alternate_back_from_the_winner() -> None:
@@ -63,9 +73,10 @@ def test_policy_transform_reframes_targets_using_the_position() -> None:
     def prefix_with_mover(
         positions: Sequence[NimPosition], policies: Sequence[dict[str, float]]
     ) -> Sequence[dict[str, float]]:
-        assert len(positions) == len(policies) == 1
-        position, policy = positions[0], policies[0]
-        return [{f"{position.active_player_id}:{ply}": p for ply, p in policy.items()}]
+        return [
+            {f"{position.active_player_id}:{ply}": p for ply, p in policy.items()}
+            for position, policy in zip(positions, policies, strict=True)
+        ]
 
     collector = SelfPlayCollector(
         evaluator=NimNNEvaluator(model=NimMLP()),
@@ -82,11 +93,12 @@ def test_policy_transform_reframes_targets_using_the_position() -> None:
     ]
 
 
-def test_policy_transform_receives_positions_and_policies_paired_by_index() -> None:
-    # The collector calls the transform batch-of-one, but the signature itself
-    # is plural: the transform must receive N positions and N policies aligned
-    # by index, and a transform that re-keys per index must land its result on
-    # the matching sample rather than, say, the first index for every call.
+def test_policy_transform_receives_one_batch_per_turn_paired_by_index() -> None:
+    # The transform is called once per fleet-turn with every live game's position,
+    # and a transform that re-keys by index must land each result on the game that
+    # row came from. Piles 3, 4 and 5 finish at turns 3, 4 and 5, so the batch
+    # narrows as games retire — and a game's row moves when an earlier game leaves,
+    # which is what makes a misrouted result visible rather than coincidentally right.
     received: list[tuple[Sequence[NimPosition], Sequence[dict[str, float]]]] = []
 
     def record_and_tag_by_index(
@@ -101,18 +113,76 @@ def test_policy_transform_receives_positions_and_policies_paired_by_index() -> N
     collector = SelfPlayCollector(
         evaluator=NimNNEvaluator(model=NimMLP()),
         engine_factory=lambda: MCTSEngine(evaluator=NullEvaluator(), iterations=10),
-        position_factory=lambda: NimPosition(pile=3, takes=(1,)),
+        position_factory=_piles(3, 4, 5),
         policy_transform=record_and_tag_by_index,
     )
-    samples = collector.collect(n_games=1)
+    samples = collector.collect(n_games=3)
 
-    assert len(received) == 3  # one call per step of the pile-3 forced line
     for positions, policies in received:
-        assert len(positions) == len(policies) == 1
-    # Each call's single position/policy pair lands at index 0 — the transform's
-    # "row0" tag on every call confirms the re-keyed result reaches its own
-    # sample rather than being dropped or misrouted.
-    assert all(sample.target_policy == {"row0:1": 1.0} for sample in samples)
+        assert len(positions) == len(policies)
+    # One call per turn, each carrying the live games in slot order: all three
+    # count down together until the pile-3 game retires, then the pile-4 one.
+    assert [[position.pile for position in positions] for positions, _ in received] == [
+        [3, 4, 5],
+        [2, 3, 4],
+        [1, 2, 3],
+        [1, 2],
+        [1],
+    ]
+    # Slot order in, slot order out. Each game's samples run newest step first, so
+    # the tags read backwards through that game's turns: the pile-5 game was row 2
+    # until the pile-3 game left, then row 1, then row 0 on its final turn.
+    assert [sample.target_policy for sample in samples] == [
+        {"row0:1": 1.0}, {"row0:1": 1.0}, {"row0:1": 1.0},
+        {"row0:1": 1.0}, {"row1:1": 1.0}, {"row1:1": 1.0}, {"row1:1": 1.0},
+        {"row0:1": 1.0}, {"row1:1": 1.0}, {"row2:1": 1.0}, {"row2:1": 1.0}, {"row2:1": 1.0},
+    ]
+
+
+def test_a_fleet_matches_the_same_games_played_one_at_a_time() -> None:
+    # The fleet changes only the driving. A fleet of three deterministic games must
+    # return exactly what three separate one-game collects returned — same samples,
+    # same order — which also pins that equal starting positions stay independent.
+    sequential = [
+        sample
+        for _ in range(3)
+        for sample in _collector(starting_pile=3).collect(n_games=1)
+    ]
+    fleet = _collector(starting_pile=3).collect(n_games=3)
+
+    assert len(fleet) == len(sequential)
+    for fleet_sample, sequential_sample in zip(fleet, sequential, strict=True):
+        assert fleet_sample.target_value == sequential_sample.target_value
+        assert fleet_sample.target_policy == sequential_sample.target_policy
+        assert fleet_sample.encoded_position.equal(sequential_sample.encoded_position)
+
+
+def test_games_of_different_lengths_retire_without_disturbing_each_other() -> None:
+    # Piles 5, 3 and 4 run 5, 3 and 4 turns, so the games retire in the order slot 1,
+    # slot 2, slot 0. Each game's values must alternate back from its own winner and
+    # its encodings count down its own pile, unaffected by the others' lengths — and
+    # the deliberately unsorted piles mean returning the buckets in the order the
+    # games finished would fail here, where an ascending fleet would coincide with
+    # slot order and hide it.
+    collector = SelfPlayCollector(
+        evaluator=NimNNEvaluator(model=NimMLP()),
+        engine_factory=lambda: MCTSEngine(evaluator=NullEvaluator(), iterations=10),
+        position_factory=_piles(5, 3, 4),
+    )
+    samples = collector.collect(n_games=3)
+
+    # Slot order, each game newest step first: pile 5 (player 1 wins), pile 3
+    # (player 1 wins), pile 4 (player 2 wins).
+    assert [sample.target_value for sample in samples] == [
+        1.0, -1.0, 1.0, -1.0, 1.0,
+        1.0, -1.0, 1.0,
+        1.0, -1.0, 1.0, -1.0,
+    ]
+    assert [float(sample.encoded_position[0]) for sample in samples] == [
+        1.0, 2.0, 3.0, 4.0, 5.0,
+        1.0, 2.0, 3.0,
+        1.0, 2.0, 3.0, 4.0,
+    ]
 
 
 def test_one_engine_serves_every_game_in_the_collect() -> None:

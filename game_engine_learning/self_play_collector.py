@@ -59,10 +59,19 @@ class SelfPlayCollector[TPly: GamePly, TPosition: GamePosition[Any]]:
     TrainingSample is a lossy projection that has already dropped the position, so
     any such interpretation deferred to a downstream consumer is unrecoverable.
 
-    The game loop stays sequential: one game is played to completion, one ply at
-    a time, before the next starts. batch_ops is called batch-of-one throughout
-    this class, matching the shape the fleet wave (multiple games at once) will
-    widen without changing this class's call sites.
+    The collector is the fleet driver: collect(n) runs all n games at once,
+    advancing each by one ply per turn, so every seam it touches — the terminal
+    test, the search, the encoding, the policy transform, the ply application — is
+    called once per turn with the whole live fleet rather than once per game. That
+    is what lets the engine batch every game's search into shared evaluations; the
+    batching win only materialises if something keeps n games' searches in flight
+    simultaneously, and the collector is the natural owner of that.
+
+    Games finish at different turns. A finished game retires from the fleet, which
+    narrows every subsequent batch, so the last turns of a collect run at low
+    occupancy — the long tail. The fleet is fixed: no new game replaces a retired
+    one (epic backlog P4) and no work is speculatively issued to keep the batch wide
+    (P3). The tail costs wall-clock at the end of a collect and nothing else.
 
     Args:
         evaluator: Used to encode each position into a tensor for the training sample.
@@ -100,15 +109,19 @@ class SelfPlayCollector[TPly: GamePly, TPosition: GamePosition[Any]]:
         self._batch_ops = batch_ops if batch_ops is not None else BatchPositionProcessor()
 
     def collect(self, n_games: int) -> list[TrainingSample]:
-        """Play n_games complete games and return all resulting TrainingSamples."""
-        engine = self._engine_factory()
-        samples: list[TrainingSample] = []
-        for _ in range(n_games):
-            # A fleet of one: collect still enters the fleet loop once per game, so
-            # every batch below is width one. Bootstrapping all n_games into a single
-            # fleet is the rest of issue #24.
-            samples.extend(self._play_fleet(engine, fleet_size=1))
-        return samples
+        """Play n_games complete games as one fleet and return all their TrainingSamples.
+
+        All n_games are in flight at once, advanced one ply each per turn, so every
+        turn presents the engine with n_games positions to search together. The games
+        are independent — the fleet exists to make the batches wide, not to relate the
+        games to each other.
+
+        Samples are returned in slot order: game 0's samples (newest step first), then
+        game 1's, and so on. Games finish at different turns, so this is deliberately
+        not the order they finished in — it keeps the result identical to what playing
+        the same games one at a time would have produced.
+        """
+        return self._play_fleet(self._engine_factory(), fleet_size=n_games)
 
     def _play_fleet(
         self, engine: MCTSEngine[TPly, TPosition, Any], fleet_size: int
