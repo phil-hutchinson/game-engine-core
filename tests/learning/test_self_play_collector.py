@@ -293,6 +293,53 @@ def test_each_seam_is_called_once_per_turn_at_the_live_fleet_width() -> None:
     assert outcome_widths == [3, 3, 3, 3, 2, 1]
 
 
+def test_an_empty_fleet_plays_no_turns() -> None:
+    # collect(0) is a legitimate call — a caller may have nothing to play this
+    # iteration — and there is no turn to run, so nothing may reach the seams.
+    search_widths: list[int] = []
+    outcome_widths: list[int] = []
+    apply_widths: list[int] = []
+
+    collector = SelfPlayCollector(
+        evaluator=NimNNEvaluator(model=NimMLP()),
+        engine_factory=lambda: _WidthRecordingEngine(search_widths),
+        position_factory=_piles(),
+        batch_ops=_WidthRecordingBatchProcessor(outcome_widths, apply_widths),
+    )
+
+    assert collector.collect(n_games=0) == []
+    assert not search_widths
+    assert not outcome_widths
+    assert not apply_widths
+
+
+def test_a_game_starting_terminal_retires_before_it_is_ever_searched() -> None:
+    # An empty pile is already decided, so slot 1 contributes no samples: there is
+    # no step to back-fill. It must also never reach the engine — a terminal slot
+    # makes select_plies_for_training raise, which would forfeit the searches of
+    # every other game in the fleet, not just its own.
+    search_widths: list[int] = []
+    outcome_widths: list[int] = []
+    apply_widths: list[int] = []
+
+    collector = SelfPlayCollector(
+        evaluator=NimNNEvaluator(model=NimMLP()),
+        engine_factory=lambda: _WidthRecordingEngine(search_widths),
+        position_factory=_piles(3, 0, 2),
+        batch_ops=_WidthRecordingBatchProcessor(outcome_widths, apply_widths),
+    )
+    samples = collector.collect(n_games=3)
+
+    # The live games' samples, in slot order, with the decided game's slot absent
+    # rather than empty-padded: pile 3 (player 1 wins), then pile 2 (player 2 wins).
+    assert [sample.target_value for sample in samples] == [1.0, -1.0, 1.0, 1.0, -1.0]
+    assert [float(sample.encoded_position[0]) for sample in samples] == [1.0, 2.0, 3.0, 1.0, 2.0]
+    # The first terminal test sees all three games; every search sees only the two
+    # that were ever live.
+    assert outcome_widths[0] == 3
+    assert search_widths == [2, 2, 1]
+
+
 def test_collect_accumulates_across_games() -> None:
     samples = _collector(starting_pile=3).collect(n_games=2)
     assert len(samples) == 6
