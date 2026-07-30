@@ -76,9 +76,13 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
         if self._root_node is None:
             self._root_node = self._create_root(game_position)
 
-        self._grow_tree(self._root_node)
+        # Play is the fleet at N = 1: the retained root is wrapped into a
+        # one-slot fleet and searched by the same machinery as training.
+        root_nodes = [self._root_node]
 
-        return self._choose_ply(self._root_node)
+        self._grow_trees(root_nodes)
+
+        return self._choose_plies(root_nodes)[0]
 
     def observe_ply(self, position: TPosition, ply: TPly, new_position: TPosition) -> None:
         """Update tree based on ply applied in-game"""
@@ -102,13 +106,29 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
         """A new game has started, clear state"""
         self._root_node = None
 
-    def select_ply_with_policy(self, game_position: TPosition) -> tuple[TPly, dict[str, float]]:
-        """Select the best ply and return the MCTS visit distribution over all legal plies.
+    def select_plies_for_training(self, positions: Sequence[TPosition]) -> Sequence[tuple[TPly, dict[str, float]]]:
+        """Search a fleet of independent games in lockstep, one ply per game.
 
-        The visit distribution is the normalised visit count for each legal ply at the root.
-        Expansion attaches a child per legal ply, so plies the search never descended into
-        are present with 0 visits and thus 0 probability. It is used as the policy training
-        target during self-play data collection.
+        Index-aligned with ``positions``: the position at index *i* is game *i*'s, and
+        the result at index *i* is game *i*'s. Each game gets its own tree, addressed by
+        that slot; the trees never interact. A single game is the fleet at N = 1.
+
+        The point of the plural form is the evaluator call. All N trees advance one
+        iteration together, so each iteration gathers one leaf per game into a single
+        ``evaluate_positions`` call rather than making N calls of width one. With equal
+        iteration budgets the games stay synchronised with no explicit coordination.
+        Leaves that are terminal are scored from their outcome and leave the batch,
+        which narrows it without breaking lockstep — those games still advance.
+
+        Roots are built bare from ``positions`` on every call and nothing is retained
+        between calls, unlike ``select_ply``, which keeps its tree across plies. Whether
+        retaining visit statistics across plies helps in training is open (issue #30);
+        until it is settled this path does not.
+
+        Each returned policy is the normalised visit count for every legal ply at that
+        game's root, used as the policy training target during self-play collection.
+        Expansion attaches a child per legal ply, so plies the search never descended
+        into are present with 0 visits and thus 0 probability.
 
         Which plies land at exactly 0 is a function of the iteration budget against the
         branching factor: PUCT is free to leave a low-prior ply unvisited at any budget,
@@ -117,12 +137,15 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
         0 here is a hard zero in a cross-entropy policy target.
 
         Returns:
-            A tuple of (selected_ply, policy) where policy maps str(ply) to probability
-            for every legal ply in the position.
+            One (selected_ply, policy) pair per input position, in slot order, where
+            policy maps str(ply) to probability for every legal ply in that position.
         """
-        root = self._create_root(game_position)
-        self._grow_tree(root)
-        return self._choose_ply(root), self._visit_distribution(root)
+        roots = self._create_roots(positions)
+        self._grow_trees(roots)
+        return list(zip(self._choose_plies(roots), self._visit_distributions(roots), strict=True))
+
+    def _create_roots(self, game_positions: Sequence[TPosition]) -> Sequence[MCTSNode[TPosition, TPly]]:
+        return [self._create_root(game_position) for game_position in game_positions]
 
     def _create_root(self, game_position: TPosition) -> MCTSNode[TPosition, TPly]:
         """Create a bare root node for the given position."""
@@ -131,16 +154,23 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
         )
         return root
 
-    def _grow_tree(self, root: MCTSNode[TPosition, TPly]) -> None:
-        """Run all MCTS iterations on the tree provided by root."""
-        for _ in range(self.iterations):
-            self._mcts_iteration(root)
+    def _grow_trees(self, roots: Sequence[MCTSNode[TPosition, TPly]]) -> None:
+        """Run the full iteration budget against every tree in the fleet.
 
-    def _choose_ply(self, root: MCTSNode[TPosition, TPly]) -> TPly:
+        One pass of the loop is one iteration for every tree, so equal budgets keep
+        the games synchronised without tracking progress per slot.
+        """
+        for _ in range(self.iterations):
+            self._mcts_iteration(roots)
+
+    def _choose_plies(self, roots: Sequence[MCTSNode[TPosition, TPly]]) -> Sequence[TPly]:
         """Select a ply from the root's children according to the temperature setting."""
         if self._temperature == 0.0:
-            return self._select_best_ply(root)
-        return self._select_best_ply_with_temperature(root, self._temperature)
+            return [self._select_best_ply(root) for root in roots]
+        return [self._select_best_ply_with_temperature(root, self._temperature) for root in roots]
+
+    def _visit_distributions(self, roots: Sequence[MCTSNode[TPosition, TPly]]) -> Sequence[dict[str, float]]:
+        return [self._visit_distribution(root) for root in roots]
 
     def _visit_distribution(self, root: MCTSNode[TPosition, TPly]) -> dict[str, float]:
         """Return a normalised visit-count distribution over all legal plies at the root."""
@@ -158,39 +188,72 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
             return {str(ply): 1.0 / len(legal_plies) for ply in legal_plies}
         return {k: v / total for k, v in child_visits.items()}
 
-    def _mcts_iteration(self, root: MCTSNode[TPosition, TPly]) -> None:
-        """Run one MCTS iteration: Select, Evaluate, Expand, Backpropagate.
+    def _mcts_iteration(self, roots: Sequence[MCTSNode[TPosition, TPly]]) -> None:
+        """Run one MCTS iteration for every tree: Select, Evaluate, Expand, Backpropagate.
 
-        Exactly one evaluation per iteration. The value backpropagated is the
-        leaf's own — expansion only makes the leaf descendable next time, and a
-        terminal leaf is re-scored from its outcome without reaching the
-        evaluator.
+        Each phase sweeps the whole fleet before the next begins, which is what
+        collapses N evaluator calls of width one into a single batched call. Every
+        tree advances exactly one iteration, so the fleet stays in lockstep.
+
+        Still exactly one evaluation per tree per iteration. The value
+        backpropagated is the leaf's own — expansion only makes the leaf
+        descendable next time, and a terminal leaf is re-scored from its outcome
+        without reaching the evaluator.
         """
-        selected_node = self._select_leaf(root)
+        selected_nodes = self._select_leaves(roots)
 
-        outcome = self._batch_ops.outcomes([selected_node.position])[0]
-        if outcome is not None:
-            value = float(outcome)
-        else:
-            value = self._evaluate_and_expand_node(selected_node)
+        outcomes = self._batch_ops.outcomes([selected_node.position for selected_node in selected_nodes])
 
-        self._backpropagate(selected_node, value)
+        # Partition the leaves by outcome. Terminal leaves are scored from that
+        # outcome and leave the batch; the rest are evaluated together and their
+        # values scattered back, with pending as the lane map — pending[i] is the
+        # slot that evaluation i belongs to. Every slot in values is written
+        # exactly once, here or in the scatter below, so the 0.0 never survives.
+        values: list[float] = [0.0] * len(selected_nodes)
+        pending: list[int] = []
+        for slot, outcome in enumerate(outcomes):
+            if outcome is None:
+                pending.append(slot)
+            else:
+                values[slot] = float(outcome)
 
-    def _select_leaf(self, root: MCTSNode[TPosition, TPly]) -> MCTSNode[TPosition, TPly]:
-        """Descend by PUCT to a leaf: a node with no children.
+        # Guarded because an all-terminal iteration has nothing to evaluate — routine
+        # late in a game — and there is no reason to hand the evaluator an empty batch.
+        if pending:
+            leaves = [selected_nodes[slot] for slot in pending]
+            evaluation_values = self._evaluate_and_expand_nodes(leaves)
+            for slot, evaluation_value in zip(pending, evaluation_values, strict=True):
+                values[slot] = evaluation_value
 
-        That is either a node not yet evaluated, or a terminal one — which never
-        gains children and so is reached as a leaf on every iteration it wins.
+        for node, value in zip(selected_nodes, values, strict=True):
+            self._backpropagate(node, value)
+
+    def _select_leaves(self, roots: Sequence[MCTSNode[TPosition, TPly]]) -> Sequence[MCTSNode[TPosition, TPly]]:
+        """Descend by PUCT to one leaf per tree, returned in the order the roots came in.
+
+        A leaf is a node with no children: either a node not yet evaluated, or a
+        terminal one — which never gains children and so is reached as a leaf on
+        every iteration it wins.
+
+        The slot ordering is load-bearing. Everything downstream pairs these leaves
+        with their outcomes, evaluations and values by index, so a result that did
+        not come back in root order would be backpropagated into the wrong tree.
         """
-        current = root
 
-        while current.children:
-            best_child = max(current.children, key=lambda child: child.puct_value())
-            current = best_child
+        return_value: list[MCTSNode[TPosition, TPly]] = []
 
-        return current
+        for root in roots:
+            current = root
 
-    def _evaluate_and_expand_node(self, node: MCTSNode[TPosition, TPly]) -> float:
+            while current.children:
+                best_child = max(current.children, key=lambda child: child.puct_value())
+                current = best_child
+
+            return_value.append(current)
+
+        return return_value
+
+    def _evaluate_and_expand_nodes(self, nodes: Sequence[MCTSNode[TPosition, TPly]]) -> Sequence[float]:
         """Evaluate a non-terminal leaf and attach a child for every legal ply.
 
         The policy is consumed here and not retained: a prior is only ever read
@@ -203,29 +266,33 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
         one frame up already knows — free when outcome was a property read, not
         free now that it is a seam call a game may vectorise.
         """
-        evaluation = self.evaluator.evaluate_positions([node.position])[0]
-        policy = evaluation.policy
-        legal_plies: Sequence[TPly] = self._batch_ops.legal_plies([node.position])[0]
+        evaluations = self.evaluator.evaluate_positions([node.position for node in nodes])
 
-        # Build the children before attaching any, so an incomplete policy leaves
-        # the node an unexpanded leaf rather than a half-expanded one.
-        children: list[MCTSNode[TPosition, TPly]] = []
-        for legal_ply in legal_plies:
-            ply_key = str(legal_ply)
-            try:
-                prior = policy[ply_key]
-            except KeyError:
-                raise ValueError(f"Policy missing entry for ply '{ply_key}'") from None
-            new_position = self._batch_ops.apply_plies([node.position], [legal_ply])[0]
-            children.append(MCTSNode(
-                position=new_position,
-                parent=node,
-                ply_from_parent=legal_ply,
-                prior=prior,
-            ))
 
-        node.children.extend(children)
-        return evaluation.value
+        policies = [evaluation.policy for evaluation in evaluations]
+        batch_legal_plies: Sequence[Sequence[TPly]] = self._batch_ops.legal_plies([node.position for node in nodes])
+
+        for node, policy, legal_plies in zip(nodes, policies, batch_legal_plies, strict = True):
+            # Build the children before attaching any, so an incomplete policy leaves
+            # the node an unexpanded leaf rather than a half-expanded one.
+            children: list[MCTSNode[TPosition, TPly]] = []
+            for legal_ply in legal_plies:
+                ply_key = str(legal_ply)
+                try:
+                    prior = policy[ply_key]
+                except KeyError:
+                    raise ValueError(f"Policy missing entry for ply '{ply_key}'") from None
+                new_position = self._batch_ops.apply_plies([node.position], [legal_ply])[0]
+                children.append(MCTSNode(
+                    position=new_position,
+                    parent=node,
+                    ply_from_parent=legal_ply,
+                    prior=prior,
+                ))
+
+            node.children.extend(children)
+
+        return [evaluation.value for evaluation in evaluations]
 
     def _backpropagate(self, node: MCTSNode[TPosition, TPly], value: float) -> None:
         """Update statistics for this node and all ancestors."""

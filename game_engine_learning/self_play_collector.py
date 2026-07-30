@@ -94,7 +94,10 @@ class SelfPlayCollector[TPly: GamePly, TPosition: GamePosition[Any]]:
 
         while self._batch_ops.outcomes([position])[0] is None:
             encoded = self._evaluator.encode_positions([position])[0]
-            ply, policy = engine.select_ply_with_policy(position)
+            # A fleet of one: this loop still plays games one at a time, so it drives
+            # the engine's training path at width one. Turning it into a real fleet
+            # driver is issue #24.
+            ply, policy = engine.select_plies_for_training([position])[0]
             # Frame-correct the visit distribution while the position — and thus its
             # active_player_id — is still in scope. Without a transform the raw
             # str(ply) distribution is stored verbatim (identity).

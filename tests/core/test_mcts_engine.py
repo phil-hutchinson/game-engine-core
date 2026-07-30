@@ -29,11 +29,11 @@ def test_forced_win_in_one_is_found() -> None:
 
 
 def test_search_values_carry_correct_signs() -> None:
-    # Inspects the tree via the private _create_root/_grow_tree: the per-node value signs are
+    # Inspects the tree via the private _create_root/_grow_trees: the per-node value signs are
     # the convention under test and are not observable through the public API.
     engine = _engine(iterations=100)
     root = engine._create_root(NimPosition(pile=2))  # pyright: ignore[reportPrivateUsage]
-    engine._grow_tree(root)  # pyright: ignore[reportPrivateUsage]
+    engine._grow_trees([root])  # pyright: ignore[reportPrivateUsage]
 
     children = {str(child.ply_from_parent): child for child in root.children}
     assert set(children) == {"1", "2"}
@@ -58,13 +58,13 @@ def test_select_ply_on_position_without_plies_raises() -> None:
 
 
 def test_single_legal_ply_gets_full_distribution() -> None:
-    ply, policy = _engine(iterations=10).select_ply_with_policy(NimPosition(pile=1))
+    ply, policy = _engine(iterations=10).select_plies_for_training([NimPosition(pile=1)])[0]
     assert ply.take == 1
     assert policy == {"1": 1.0}
 
 
 def test_visit_distribution_covers_all_legal_plies_and_sums_to_one() -> None:
-    _, policy = _engine(iterations=100).select_ply_with_policy(NimPosition(pile=5))
+    _, policy = _engine(iterations=100).select_plies_for_training([NimPosition(pile=5)])[0]
     assert set(policy) == {"1", "2"}
     assert all(p >= 0.0 for p in policy.values())
     assert sum(policy.values()) == pytest.approx(1.0)
@@ -75,7 +75,7 @@ def test_visit_distribution_includes_zero_visit_plies() -> None:
     # visits; iteration 2 descends into exactly one of them. The sibling is a
     # child by then rather than an unexplored ply, but must still appear in the
     # distribution with probability 0.
-    _, policy = _engine(iterations=2).select_ply_with_policy(NimPosition(pile=5))
+    _, policy = _engine(iterations=2).select_plies_for_training([NimPosition(pile=5)])[0]
     assert set(policy) == {"1", "2"}
     assert sorted(policy.values()) == [0.0, 1.0]
 
@@ -83,12 +83,12 @@ def test_visit_distribution_includes_zero_visit_plies() -> None:
 def test_visit_distribution_is_uniform_while_every_child_is_unvisited() -> None:
     # After the single iteration that expands the root, every child exists at 0
     # visits, so there are no counts to normalise and the uniform fallback holds.
-    _, policy = _engine(iterations=1).select_ply_with_policy(NimPosition(pile=5))
+    _, policy = _engine(iterations=1).select_plies_for_training([NimPosition(pile=5)])[0]
     assert policy == {"1": 0.5, "2": 0.5}
 
 
 def test_visit_distribution_uniform_fallback_without_visits() -> None:
-    _, policy = _engine(iterations=0).select_ply_with_policy(NimPosition(pile=5))
+    _, policy = _engine(iterations=0).select_plies_for_training([NimPosition(pile=5)])[0]
     assert policy == {"1": 0.5, "2": 0.5}
 
 
@@ -138,7 +138,7 @@ def test_first_iteration_evaluates_the_root_and_attaches_every_child() -> None:
     # the uniform default the old expand-a-child flow left them with.
     engine, evaluator = _policy_engine({"1": 0.25, "2": 0.75}, iterations=1)
     root = engine._create_root(NimPosition(pile=5))  # pyright: ignore[reportPrivateUsage]
-    engine._grow_tree(root)  # pyright: ignore[reportPrivateUsage]
+    engine._grow_trees([root])  # pyright: ignore[reportPrivateUsage]
 
     assert evaluator.calls == 1
     assert root.visits == 1
@@ -169,7 +169,7 @@ def test_a_dominant_prior_is_reselected_while_its_sibling_stays_unvisited() -> N
     # values stay flat at 0 and the priors are the only thing driving selection.
     engine, _ = _policy_engine({"1": 0.99, "2": 0.01}, iterations=5)
     root = engine._create_root(NimPosition(pile=20))  # pyright: ignore[reportPrivateUsage]
-    engine._grow_tree(root)  # pyright: ignore[reportPrivateUsage]
+    engine._grow_trees([root])  # pyright: ignore[reportPrivateUsage]
 
     visits = {str(child.ply_from_parent): child.visits for child in root.children}
     assert visits == {"1": 4, "2": 0}
@@ -190,7 +190,7 @@ def test_terminal_leaves_are_scored_from_their_outcome_without_evaluating() -> N
     # outcome. The evaluator is never called again.
     engine, evaluator = _policy_engine({"1": 1.0}, iterations=5)
     root = engine._create_root(NimPosition(pile=1))  # pyright: ignore[reportPrivateUsage]
-    engine._grow_tree(root)  # pyright: ignore[reportPrivateUsage]
+    engine._grow_trees([root])  # pyright: ignore[reportPrivateUsage]
 
     assert evaluator.calls == 1
     terminal_child = root.children[0]
@@ -225,13 +225,13 @@ def test_incomplete_policy_leaves_the_node_unexpanded() -> None:
     root = engine._create_root(NimPosition(pile=5))  # pyright: ignore[reportPrivateUsage]
 
     with pytest.raises(ValueError):
-        engine._grow_tree(root)  # pyright: ignore[reportPrivateUsage]
+        engine._grow_trees([root])  # pyright: ignore[reportPrivateUsage]
 
     assert root.children == []
 
 
 def test_temperature_zero_picks_most_visited_ply() -> None:
-    # Builds a root with known visit counts and drives the private _choose_ply:
+    # Builds a root with known visit counts and drives the private _choose_plies:
     # a real search cannot guarantee a specific visit split.
     engine = _engine(iterations=0)
     root: MCTSNode[NimPosition, NimPly] = MCTSNode(
@@ -244,7 +244,7 @@ def test_temperature_zero_picks_most_visited_ply() -> None:
                  ply_from_parent=NimPly(2), visits=10),
     ]
 
-    assert engine._choose_ply(root).take == 2  # pyright: ignore[reportPrivateUsage]
+    assert engine._choose_plies([root])[0].take == 2  # pyright: ignore[reportPrivateUsage]
 
 
 def test_temperature_sampling_returns_a_legal_ply() -> None:

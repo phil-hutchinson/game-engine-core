@@ -132,7 +132,7 @@ def test_search_succeeds_when_position_scalars_raise_but_processor_avoids_them()
     ply = engine.select_ply(_RaisingScalarsNimPosition(pile=5))
     assert ply.take in {1, 2}
 
-    ply, policy = engine.select_ply_with_policy(_RaisingScalarsNimPosition(pile=5))
+    ply, policy = engine.select_plies_for_training([_RaisingScalarsNimPosition(pile=5)])[0]
     assert ply.take in {1, 2}
     assert set(policy) == {"1", "2"}
 
