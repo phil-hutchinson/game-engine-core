@@ -174,7 +174,16 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
         return [self._visit_distribution(root) for root in roots]
 
     def _visit_distribution(self, root: MCTSNode[TPosition, TPly]) -> dict[str, float]:
-        """Return a normalised visit-count distribution over all legal plies at the root."""
+        """Return a normalised visit-count distribution over all legal plies at the root.
+
+        The zero-total fallback below is deliberately left at width one, so a fleet of
+        N makes N legality calls rather than one of width N. It is the only width-one
+        seam call left on the fleet path. It fires only when the budget cannot descend
+        past a root — a budget that small is not a configuration worth optimising for,
+        and widening it would mean restructuring ply choice into a plural form to reach
+        the same fallback in _select_best_ply and _select_best_ply_with_temperature.
+        Pinned by test_the_zero_visit_fallback_still_asks_for_legality_one_slot_at_a_time.
+        """
         child_visits: dict[str, int] = {
             str(child.ply_from_parent): child.visits
             for child in root.children
