@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ..game.batch_position_processor import BatchPositionProcessor
+from ..models.position_evaluation import PositionEvaluation
 from ..protocols.game_ply import GamePly
 from ..protocols.game_position import GamePosition
 from ..protocols.position_evaluator import PositionEvaluator
@@ -221,9 +222,10 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
         # late in a game — and there is no reason to hand the evaluator an empty batch.
         if pending:
             leaves = [selected_nodes[slot] for slot in pending]
-            evaluation_values = self._evaluate_and_expand_nodes(leaves)
-            for slot, evaluation_value in zip(pending, evaluation_values, strict=True):
-                values[slot] = evaluation_value
+            evaluations = self.evaluator.evaluate_positions([leaf.position for leaf in leaves])
+            for slot, evaluation in zip(pending, evaluations, strict=True):
+                values[slot] = evaluation.value
+            self._expand_leaves(leaves, evaluations)
 
         for node, value in zip(selected_nodes, values, strict=True):
             self._backpropagate(node, value)
@@ -253,46 +255,51 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
 
         return return_value
 
-    def _evaluate_and_expand_nodes(self, nodes: Sequence[MCTSNode[TPosition, TPly]]) -> Sequence[float]:
-        """Evaluate a non-terminal leaf and attach a child for every legal ply.
+    def _expand_leaves(
+        self,
+        leaves: Sequence[MCTSNode[TPosition, TPly]],
+        evaluations: Sequence[PositionEvaluation],
+    ) -> None:
+        """Attach a child per legal ply to every leaf, priced by its evaluation's policy.
 
-        The policy is consumed here and not retained: a prior is only ever read
-        at child construction. Evaluators must supply one covering every legal
-        ply (see PositionEvaluation.policy) — the engine has no uniform default.
+        Pairs ``leaves`` with ``evaluations`` by index. Both arrive already narrowed to
+        the non-terminal leaves of one iteration, so this method works entirely in that
+        narrowed space and never sees a slot index — mapping results back to games is
+        the caller's business.
 
-        The caller is responsible for only reaching here with a non-terminal
-        leaf: _mcts_iteration establishes that from the outcome it already has.
-        Re-asserting it would mean a second trip through batch_ops for a fact
-        one frame up already knows — free when outcome was a property read, not
-        free now that it is a seam call a game may vectorise.
+        Each policy is consumed here and not retained: a prior is only ever read at
+        child construction. Evaluators must supply one covering every legal ply (see
+        PositionEvaluation.policy) — the engine has no uniform default.
+
+        The caller is responsible for only passing non-terminal leaves, which it
+        establishes from the outcomes it already has. Re-checking would mean a second
+        trip through batch_ops for a fact one frame up already knows — free when
+        outcome was a property read, not free now that it is a seam call a game may
+        vectorise.
         """
-        evaluations = self.evaluator.evaluate_positions([node.position for node in nodes])
+        batch_legal_plies: Sequence[Sequence[TPly]] = self._batch_ops.legal_plies(
+            [leaf.position for leaf in leaves]
+        )
 
-
-        policies = [evaluation.policy for evaluation in evaluations]
-        batch_legal_plies: Sequence[Sequence[TPly]] = self._batch_ops.legal_plies([node.position for node in nodes])
-
-        for node, policy, legal_plies in zip(nodes, policies, batch_legal_plies, strict = True):
+        for leaf, evaluation, legal_plies in zip(leaves, evaluations, batch_legal_plies, strict=True):
             # Build the children before attaching any, so an incomplete policy leaves
-            # the node an unexpanded leaf rather than a half-expanded one.
+            # the leaf an unexpanded leaf rather than a half-expanded one.
             children: list[MCTSNode[TPosition, TPly]] = []
             for legal_ply in legal_plies:
                 ply_key = str(legal_ply)
                 try:
-                    prior = policy[ply_key]
+                    prior = evaluation.policy[ply_key]
                 except KeyError:
                     raise ValueError(f"Policy missing entry for ply '{ply_key}'") from None
-                new_position = self._batch_ops.apply_plies([node.position], [legal_ply])[0]
+                new_position = self._batch_ops.apply_plies([leaf.position], [legal_ply])[0]
                 children.append(MCTSNode(
                     position=new_position,
-                    parent=node,
+                    parent=leaf,
                     ply_from_parent=legal_ply,
                     prior=prior,
                 ))
 
-            node.children.extend(children)
-
-        return [evaluation.value for evaluation in evaluations]
+            leaf.children.extend(children)
 
     def _backpropagate(self, node: MCTSNode[TPosition, TPly], value: float) -> None:
         """Update statistics for this node and all ancestors."""
