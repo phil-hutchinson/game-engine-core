@@ -201,6 +201,19 @@ examples.tictactoe_learning.train` completes an iteration with a decreasing loss
 `pytest examples` green. Record the before/after timing of the selfplay run in the peer
 review or commit message.
 
+**Result.** `selfplay` (20 games, 200 MCTS iterations, CPU): 142 samples, 45/63/34
+win/draw/loss, mean policy entropy 1.760 bits against a 2.361-bit uniform baseline —
+the same shape as the sequential driver's 154 samples and 44/72/38. `train --iterations 3
+--games 8 --epochs 5 --mcts-iterations 100` completed every iteration with loss falling
+within each. `pytest examples` 102 passed.
+
+Wall-clock over three runs each of `selfplay`, fleet against the branch point f032086:
+**3.31 / 3.43 / 3.50 s** versus **4.80 / 4.96 / 5.05 s** — about 1.45× faster. Worth
+noting this is the *unfavourable* case for the story's thesis: a tiny MLP on CPU, where a
+batched forward is nowhere near flat in cost. The win here comes mostly from amortising
+per-call overhead rather than from GPU saturation, so it is a floor on what the change is
+worth, not a ceiling.
+
 ---
 
 ### Step 7 — Reconcile the documentation
