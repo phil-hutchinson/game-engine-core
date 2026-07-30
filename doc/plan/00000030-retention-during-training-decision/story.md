@@ -35,7 +35,7 @@ more independent visit-distribution training targets.
 
 - Does retaining visit statistics across plies measurably improve self-play data
   quality / training, enough to justify the complexity in the fleet path?
-- If retained, how does it interact with the fleet's per-ply `select_plies` call
+- If retained, how does it interact with the fleet's per-ply `select_plies_for_training` call
   (which currently rebuilds bare roots) and with tree reuse under a network that
   changes between training iterations?
 - Recommendation, with the evidence behind it, feeding back into the #23
