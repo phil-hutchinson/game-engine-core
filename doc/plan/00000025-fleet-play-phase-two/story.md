@@ -2,8 +2,13 @@
 
 Follows the **Fleet Play** epic (#20), which delivers the skateboard: true PUCT
 expansion (#21), batch-first game protocols (#22), the fleet/wave MCTS engine
-(#23), and `SelfPlayCollector` as fleet driver (#24). Phase Two is the backlog
-of optimisations and open decisions deliberately parked out of that skateboard.
+(#23), `SelfPlayCollector` as fleet driver (#24), and the vectorised node
+representation (#26). Phase Two is the backlog of optimisations and open
+decisions deliberately parked out of that skateboard.
+
+Vectorised node representation (#26) started here and was pulled up into #20:
+with the forward pass batched, the tree-internal CPU work is the immediate wall
+rather than a later optimisation, so it belongs with the engine it refactors.
 
 ## Goal
 
@@ -13,11 +18,10 @@ skateboard. Each story here stands alone and sits on top of the phase-1 engine.
 
 ## Context: where the skateboard leaves off
 
-The skateboard batches the network forward across N games and batches the
-game-facing touchpoints (#22), but it deliberately stops short in three places:
+The skateboard batches the network forward across N games, batches the
+game-facing touchpoints (#22), and vectorises the tree internals (#26) — but it
+deliberately stops short in two places:
 
-- The **tree internals** (PUCT descent, backpropagation) stay per-tree CPU
-  loops, and children are still `MCTSNode` objects with a scalar `prior`.
 - There is **no evaluation cache** and no cross-ply reuse — each `select_plies`
   runs from bare roots.
 - The fleet is **fixed** with no midstream refill, so the live batch drains as
@@ -30,7 +34,6 @@ and whether the fleet path should serve non-learning tournament play.
 
 | # | Story | Addresses |
 |---|-------|-----------|
-| #26 | Vectorised node representation | Tree internals still per-node; PUCT is a Python loop |
 | #27 | Position-keyed evaluation cache | No eval reuse; retention-as-performance has no home |
 | #28 | Speculative batch backfill (tail trimming) | Long tail runs at low GPU occupancy |
 | #29 | Midstream refill / queueing | Fixed fleet drains over time |
@@ -39,9 +42,6 @@ and whether the fleet path should serve non-learning tournament play.
 
 ### Dependencies and ordering
 
-- **#26** is independent — a self-contained refactor of the node representation
-  that vectorises selection. It makes the internals cheaper but changes no
-  results.
 - **#27** introduces the position hash/equality contract and an LRU cache in
   front of `evaluate_positions`. It is the prerequisite for #28 and the cleaner
   home for any retention-as-performance value (see #30).
@@ -68,6 +68,6 @@ Tree retention carries two distinct kinds of value, and Phase Two splits them:
 
 ## Non-goals (epic-wide)
 
-- Anything already delivered by the phase-1 skateboard (#20–#24).
+- Anything already delivered by the phase-1 skateboard (#20–#24, #26).
 - Distributed / multi-GPU fleets — Phase Two targets saturating a single
   device, not scaling across many.
