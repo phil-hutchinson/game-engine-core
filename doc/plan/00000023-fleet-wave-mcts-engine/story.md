@@ -9,17 +9,36 @@ Make `MCTSEngine` fleet-capable: search N independent games in lockstep so that
 each MCTS iteration produces a single batched evaluation across all N. A normal
 single game is the fleet at `N = 1`.
 
-New primitives:
+New primitive:
 
 ```python
-def select_plies(self, positions: Sequence[TPosition]) -> Sequence[TPly]: ...
-def select_plies_with_policy(
+def select_plies_for_training(
     self, positions: Sequence[TPosition]
 ) -> Sequence[tuple[TPly, dict[str, float]]]: ...
 ```
 
-`select_ply` / `select_ply_with_policy` become thin `N = 1` wrappers over these,
-preserving the existing single-game API.
+**Amended during implementation.** The story was written before the API split was
+settled; four decisions supersede parts of what follows, and the implementation plan
+records them in full.
+
+1. **Mass play exists for training only.** `select_ply` remains the *play* surface —
+   the `GameEngine` protocol method, single-game, retaining its tree across plies
+   exactly as before. `select_plies_for_training` is the *training* surface: the
+   fleet, bare roots on every call. Both run the same iteration, so play is simply
+   the fleet at `N = 1`.
+2. **No plural play form and no singular training form.** The originally proposed
+   `select_plies` is dropped for want of a consumer — #24's collector needs only the
+   training form — and `select_ply_with_policy` is deleted rather than kept as an
+   `N = 1` wrapper. So `select_ply` is *not* a wrapper over a plural form; it holds
+   its retained root and hands it to the shared iteration itself.
+3. **One class, not two.** The play/training difference is confined to root
+   provenance and return shape; node type, iteration, descent, expansion,
+   backpropagation and ply choice are all shared. Splitting would mean a base class
+   holding almost all of the code plus two thin leaves, divided on the one axis
+   (retention) that #30 leaves explicitly open.
+4. **`_root_node` stays.** The scope bullet below about holding N trees instead of a
+   single `_root_node` is superseded: the retained root remains for play, and the
+   fleet's N roots are call-scoped locals, so the engine carries no fleet state.
 
 ## The wave
 
@@ -69,7 +88,8 @@ a fleet method that holds all N trees at once. This is that method.
 ## Scope
 
 - Hold N trees (`list` of roots) instead of a single `_root_node`; index games
-  by slot.
+  by slot. *(Superseded by amendment 4: `_root_node` stays for play and the fleet's
+  roots are call-scoped.)*
 - Implement the wave: per-wave leaf selection, terminal partition (via
   `batch_ops`), one batched `evaluate_positions`, scatter of values + full
   expansion (via `batch_ops`), per-tree backpropagation.
@@ -77,8 +97,10 @@ a fleet method that holds all N trees at once. This is that method.
   `apply_plies` call per child (its peer review #3); one leaf's B children are
   already a batch without the wave, and across the fleet they collapse further
   into a single call spanning every expanding leaf.
-- `select_ply` / `select_ply_with_policy` delegate to the plural forms at
-  `N = 1`, keeping single-game behaviour identical.
+- `select_ply` keeps single-game behaviour identical by running the shared
+  iteration at `N = 1` over its retained root. *(Amended by decisions 1 and 2: it
+  does not delegate to a plural form, and `select_ply_with_policy` is deleted
+  rather than retained as a wrapper.)*
 - Build fresh (bare) roots from the supplied positions on each call — no
   cross-call retention (see non-goals).
 
