@@ -17,6 +17,7 @@ against a scalar implementation.
 """
 
 from collections.abc import Sequence
+from typing import Literal
 
 import pytest
 
@@ -53,6 +54,29 @@ class _WidthRecordingEvaluator:
             )
             for position in positions
         ]
+
+
+class _WidthRecordingBatchProcessor(BatchPositionProcessor[NimPly, NimPosition]):
+    """Records the batch width of every seam call while delegating to the base loop."""
+
+    def __init__(self) -> None:
+        self.legal_plies_widths: list[int] = []
+        self.apply_plies_widths: list[int] = []
+        self.outcomes_widths: list[int] = []
+
+    def legal_plies(self, positions: Sequence[NimPosition]) -> Sequence[Sequence[NimPly]]:
+        self.legal_plies_widths.append(len(positions))
+        return super().legal_plies(positions)
+
+    def apply_plies(
+        self, positions: Sequence[NimPosition], plies: Sequence[NimPly]
+    ) -> Sequence[NimPosition]:
+        self.apply_plies_widths.append(len(positions))
+        return super().apply_plies(positions, plies)
+
+    def outcomes(self, positions: Sequence[NimPosition]) -> Sequence[Literal[1, 0, -1] | None]:
+        self.outcomes_widths.append(len(positions))
+        return super().outcomes(positions)
 
 
 def _fleet_engine(
@@ -161,12 +185,21 @@ def test_each_slot_gets_its_own_tree_and_its_own_iteration_budget() -> None:
     assert roots[0].children[0] is not roots[1].children[0]
 
 
-def test_an_empty_fleet_returns_no_results_and_evaluates_nothing() -> None:
-    # #24 shrinks the fleet as games finish, so a width-zero call is reachable.
-    engine, evaluator = _fleet_engine(iterations=10)
+def test_an_empty_fleet_does_no_work_at_all() -> None:
+    # #24 shrinks the fleet as games finish, so a width-zero call is reachable. It must
+    # return empty without touching the evaluator — and without running the iteration
+    # loop either. Every phase of an empty iteration is a width-zero seam call, so a
+    # loop that ran anyway would make 10 of them here and thousands at a realistic
+    # budget, which a vectorised processor need not treat as free.
+    recorder = _WidthRecordingBatchProcessor()
+    evaluator = _WidthRecordingEvaluator()
+    engine = MCTSEngine(evaluator=evaluator, iterations=10, batch_ops=recorder)
 
     assert engine.select_plies_for_training([]) == []
     assert evaluator.batch_widths == []
+    assert recorder.outcomes_widths == []
+    assert recorder.legal_plies_widths == []
+    assert recorder.apply_plies_widths == []
 
 
 def test_width_one_training_search_agrees_with_the_play_path() -> None:
@@ -185,24 +218,6 @@ def test_width_one_training_search_agrees_with_the_play_path() -> None:
     trained, _ = training_engine.select_plies_for_training([position])[0]
 
     assert played.take == trained.take
-
-
-class _WidthRecordingBatchProcessor(BatchPositionProcessor[NimPly, NimPosition]):
-    """Records the batch width of every seam call while delegating to the base loop."""
-
-    def __init__(self) -> None:
-        self.legal_plies_widths: list[int] = []
-        self.apply_plies_widths: list[int] = []
-
-    def legal_plies(self, positions: Sequence[NimPosition]) -> Sequence[Sequence[NimPly]]:
-        self.legal_plies_widths.append(len(positions))
-        return super().legal_plies(positions)
-
-    def apply_plies(
-        self, positions: Sequence[NimPosition], plies: Sequence[NimPly]
-    ) -> Sequence[NimPosition]:
-        self.apply_plies_widths.append(len(positions))
-        return super().apply_plies(positions, plies)
 
 
 def test_expansion_builds_every_successor_in_the_fleet_in_one_call() -> None:
@@ -226,6 +241,7 @@ def test_expansion_builds_every_successor_in_the_fleet_in_one_call() -> None:
 
 
 def test_the_zero_visit_fallback_still_asks_for_legality_one_slot_at_a_time() -> None:
+    """Pins the width-one residue documented on MCTSEngine._visit_distribution."""
     # Documents a known width-one residue rather than endorsing it. A budget of one
     # expands each root but never descends past it, so every child sits at 0 visits
     # and the visit distribution falls back to a uniform over legal plies — asked for

@@ -126,6 +126,11 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
         retaining visit statistics across plies helps in training is open (issue #30);
         until it is settled this path does not.
 
+        Every position must be non-terminal and have at least one legal ply. A terminal
+        slot never gains children, so ply choice finds no plies to fall back on and
+        raises — forfeiting the completed searches of every other slot in the fleet, not
+        just its own. Deciding which games are in flight is the caller's job (issue #24).
+
         Each returned policy is the normalised visit count for every legal ply at that
         game's root, used as the policy training target during self-play collection.
         Expansion attaches a child per legal ply, so plies the search never descended
@@ -146,6 +151,7 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
         return list(zip(self._choose_plies(roots), self._visit_distributions(roots), strict=True))
 
     def _create_roots(self, game_positions: Sequence[TPosition]) -> Sequence[MCTSNode[TPosition, TPly]]:
+        """Create one bare root per position, in slot order."""
         return [self._create_root(game_position) for game_position in game_positions]
 
     def _create_root(self, game_position: TPosition) -> MCTSNode[TPosition, TPly]:
@@ -161,28 +167,41 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
         One pass of the loop is one iteration for every tree, so equal budgets keep
         the games synchronised without tracking progress per slot.
         """
+        # An empty fleet is reachable — #24 shrinks the fleet as its games finish — and
+        # every phase of an empty iteration is a width-zero seam call. Harmless today,
+        # but the budget is typically in the thousands and a vectorised processor need
+        # not treat an empty batch as free, so skip the loop rather than the work.
+        if not roots:
+            return
+
         for _ in range(self.iterations):
             self._mcts_iteration(roots)
 
     def _choose_plies(self, roots: Sequence[MCTSNode[TPosition, TPly]]) -> Sequence[TPly]:
-        """Select a ply from the root's children according to the temperature setting."""
+        """Select one ply per root from that root's children, in slot order.
+
+        Which rule applies is the temperature setting's business, and it is the same
+        rule for every slot.
+        """
         if self._temperature == 0.0:
             return [self._select_best_ply(root) for root in roots]
         return [self._select_best_ply_with_temperature(root, self._temperature) for root in roots]
 
     def _visit_distributions(self, roots: Sequence[MCTSNode[TPosition, TPly]]) -> Sequence[dict[str, float]]:
+        """Return one visit distribution per root, in slot order."""
         return [self._visit_distribution(root) for root in roots]
 
     def _visit_distribution(self, root: MCTSNode[TPosition, TPly]) -> dict[str, float]:
         """Return a normalised visit-count distribution over all legal plies at the root.
 
         The zero-total fallback below is deliberately left at width one, so a fleet of
-        N makes N legality calls rather than one of width N. It is the only width-one
-        seam call left on the fleet path. It fires only when the budget cannot descend
-        past a root — a budget that small is not a configuration worth optimising for,
-        and widening it would mean restructuring ply choice into a plural form to reach
-        the same fallback in _select_best_ply and _select_best_ply_with_temperature.
-        Pinned by test_the_zero_visit_fallback_still_asks_for_legality_one_slot_at_a_time.
+        N makes N legality calls rather than one of width N. It is one of the three
+        width-one seam calls left on the fleet path, alongside the no-children fallbacks
+        in _select_best_ply and _select_best_ply_with_temperature. All three fire only
+        when the budget cannot descend past a root — a budget that small is not a
+        configuration worth optimising for, and widening this one alone would not help,
+        since reaching the other two would mean restructuring ply choice into a plural
+        form as well.
         """
         child_visits: dict[str, int] = {
             str(child.ply_from_parent): child.visits
@@ -250,8 +269,7 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
         with their outcomes, evaluations and values by index, so a result that did
         not come back in root order would be backpropagated into the wrong tree.
         """
-
-        return_value: list[MCTSNode[TPosition, TPly]] = []
+        leaves: list[MCTSNode[TPosition, TPly]] = []
 
         for root in roots:
             current = root
@@ -260,9 +278,9 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
                 best_child = max(current.children, key=lambda child: child.puct_value())
                 current = best_child
 
-            return_value.append(current)
+            leaves.append(current)
 
-        return return_value
+        return leaves
 
     def _expand_leaves(
         self,
@@ -299,19 +317,33 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
         flat_positions: list[TPosition] = []
         flat_plies: list[TPly] = []
         flat_priors: list[float] = []
-        for leaf, evaluation, legal_plies in zip(leaves, evaluations, batch_legal_plies, strict=True):
+        for index, (leaf, evaluation, legal_plies) in enumerate(
+            zip(leaves, evaluations, batch_legal_plies, strict=True)
+        ):
             for legal_ply in legal_plies:
                 ply_key = str(legal_ply)
                 try:
                     flat_priors.append(evaluation.policy[ply_key])
                 except KeyError:
-                    raise ValueError(f"Policy missing entry for ply '{ply_key}'") from None
+                    # index is into this batch, not into the fleet — this method has no
+                    # slot indices — but it is enough to identify the offending
+                    # evaluation among N, which the ply key alone is not.
+                    raise ValueError(
+                        f"Policy missing entry for ply '{ply_key}' "
+                        f"(batch leaf {index}, position {leaf.position})"
+                    ) from None
                 flat_positions.append(leaf.position)
                 flat_plies.append(legal_ply)
 
         # One call spanning every expanding leaf in the fleet, index-paired rather
         # than a cross product. A leaf's own children were already a batch before the
         # fleet existed; the fleet collapses those batches into this single call.
+        #
+        # This is the one seam call whose width is not bounded by the fleet size: it is
+        # N x branching factor, where everything else on the fleet path is at most N.
+        # That is a property of eager full expansion and is transitional — #26
+        # materialises children lazily, which drops this call from expansion entirely
+        # and rebuilds successors during descent at one per tree per iteration.
         successors = self._batch_ops.apply_plies(flat_positions, flat_plies)
 
         # Walk the flat results back out to their leaves. offset is the lane map at
