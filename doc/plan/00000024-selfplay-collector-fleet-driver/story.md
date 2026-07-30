@@ -72,3 +72,46 @@ through the tail (P3) — are deferred.
 - No change to `TrainingSample`, to the value back-fill semantics, or to
   `TrainingLoop`.
 - Non-learning fleet play (tournaments / `StandardGame`) is out of scope (P6).
+
+## Decisions taken during implementation
+
+These amend the story above, which left them open.
+
+1. **One engine per `collect`, not per game.** The fleet hands *the* engine every
+   live game's position at once, so a per-game engine has no meaning.
+   `engine_factory` keeps its signature and is called once per `collect`. Safe
+   because the training surface retains nothing between calls and holds no fleet
+   state (#23's roots are call-scoped); required because lockstep depends on every
+   game sharing one iteration budget. Per-game engine *configuration* is therefore
+   no longer possible — but it was already incompatible with the fleet.
+2. **Samples are returned in slot order, not completion order.** Games retire at
+   different turns, so the natural emission order would be shortest-game-first.
+   Instead each slot accumulates its own samples and the buckets are concatenated in
+   slot order once the fleet drains, which keeps `collect`'s output identical to what
+   playing the same games one at a time produced. This refines "emit its
+   `TrainingSample`s" in the fleet loop above to mean *emit into the slot's bucket*;
+   the back-fill still happens at retirement, while the outcome is in hand.
+3. **One `outcomes` call per fleet-turn, at the top of the turn.** It decides which
+   games leave the fleet *and* supplies the retiring game's back-fill value, so the
+   sequential driver's two calls per game collapse into one per turn. It also
+   enforces the engine's precondition, since a terminal slot would raise and forfeit
+   every other game's search, and it makes a game whose starting position is already
+   decided fall out correctly, contributing no samples.
+4. **The batch is dense and compacts as games retire.** Game identity is fixed for
+   the game's life, but its position within a batch shrinks as earlier games leave.
+   The batch cannot carry holes: every seam on this path is typed
+   `Sequence[TPosition]` with no optional. Compaction is an order-preserving filter,
+   so "positions go in in slot order" still holds — the live set stays ascending in
+   original slot, merely with gaps.
+
+## Obligations on caller-supplied collaborators
+
+- **The engine must retain no per-game state on the training path.** `MCTSEngine`
+  satisfies this by construction, but `engine_factory` is typed on the concrete
+  class, so a subclass relying on per-game construction to clear state would now
+  carry it across the whole fleet.
+- **The policy transform receives one batch spanning several different games.** A
+  correct index-aligned transform is unaffected; one that assumed a call's positions
+  all came from the same game would break. The evaluator and `batch_ops` need no new
+  guarantee — both were already shared instances, and #23's wave already hands the
+  evaluator leaves from N games in a single call.

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass, field
 from typing import Any
 
 from torch import Tensor
@@ -29,6 +30,21 @@ still in scope — see SelfPlayCollector.
 """
 
 
+@dataclass
+class _FleetGame[TPosition: GamePosition[Any]]:
+    """One game's slot in the fleet, holding everything that game alone owns.
+
+    Identity is this object, not an index: the live set is a filter over the slots,
+    so a game's position within a batch shrinks as earlier games retire while the
+    game itself never moves. Its samples are filled in when it retires and read back
+    in slot order once the whole fleet has drained.
+    """
+
+    position: TPosition
+    step_records: list[tuple[Tensor, dict[str, float]]] = field(default_factory=lambda: [])
+    samples: list[TrainingSample] = field(default_factory=lambda: [])
+
+
 class SelfPlayCollector[TPly: GamePly, TPosition: GamePosition[Any]]:
     """Runs self-play games and accumulates TrainingSamples for network training.
 
@@ -43,15 +59,30 @@ class SelfPlayCollector[TPly: GamePly, TPosition: GamePosition[Any]]:
     TrainingSample is a lossy projection that has already dropped the position, so
     any such interpretation deferred to a downstream consumer is unrecoverable.
 
-    The game loop stays sequential: one game is played to completion, one ply at
-    a time, before the next starts. batch_ops is called batch-of-one throughout
-    this class, matching the shape the fleet wave (multiple games at once) will
-    widen without changing this class's call sites.
+    The collector is the fleet driver: collect(n) runs all n games at once,
+    advancing each by one ply per turn, so every seam it touches — the terminal
+    test, the search, the encoding, the policy transform, the ply application — is
+    called once per turn with the whole live fleet rather than once per game. That
+    is what lets the engine batch every game's search into shared evaluations; the
+    batching win only materialises if something keeps n games' searches in flight
+    simultaneously, and the collector is the natural owner of that.
+
+    Games finish at different turns. A finished game retires from the fleet, which
+    narrows every subsequent batch, so the last turns of a collect run at low
+    occupancy — the long tail. The fleet is fixed: no new game replaces a retired
+    one (epic backlog P4) and no work is speculatively issued to keep the batch wide
+    (P3). The tail costs wall-clock at the end of a collect and nothing else.
 
     Args:
         evaluator: Used to encode each position into a tensor for the training sample.
-        engine_factory: Called once per game to produce the MCTS engine. Allows the
-            caller to control iterations, temperature, and evaluator per game.
+        engine_factory: Called once per collect() to produce the MCTS engine that
+            searches every game. Allows the caller to control iterations, temperature
+            and evaluator, but not per game: all games share the one engine, and
+            therefore its iteration budget — which is what keeps them in lockstep.
+            The engine must retain no per-game state on the training path. MCTSEngine
+            satisfies this by construction (its fleet roots are call-scoped, and the
+            retained _root_node belongs to select_ply, which is never called here);
+            a subclass relying on per-game construction to clear state would not.
         position_factory: Called once per game to produce the starting position.
         policy_transform: Optional hook to re-express each step's MCTS visit
             distribution while the position is still in scope. Defaults to None
@@ -78,47 +109,99 @@ class SelfPlayCollector[TPly: GamePly, TPosition: GamePosition[Any]]:
         self._batch_ops = batch_ops if batch_ops is not None else BatchPositionProcessor()
 
     def collect(self, n_games: int) -> list[TrainingSample]:
-        """Play n_games complete games and return all resulting TrainingSamples."""
-        samples: list[TrainingSample] = []
-        for _ in range(n_games):
-            samples.extend(self._play_game())
-        return samples
+        """Play n_games complete games as one fleet and return all their TrainingSamples.
 
-    def _play_game(self) -> list[TrainingSample]:
-        engine = self._engine_factory()
-        position = self._position_factory()
+        All n_games are in flight at once, advanced one ply each per turn, so every
+        turn presents the engine with n_games positions to search together. The games
+        are independent — the fleet exists to make the batches wide, not to relate the
+        games to each other.
 
-        # At each step, record the encoded position and the MCTS visit distribution.
+        Samples are returned in slot order: game 0's samples (newest step first), then
+        game 1's, and so on. Games finish at different turns, so this is deliberately
+        not the order they finished in — it keeps the result identical to what playing
+        the same games one at a time would have produced.
+        """
+        return self._play_fleet(self._engine_factory(), fleet_size=n_games)
+
+    def _play_fleet(
+        self, engine: MCTSEngine[TPly, TPosition, Any], fleet_size: int
+    ) -> list[TrainingSample]:
+        """Play a fleet of games in lockstep and return their samples in slot order.
+
+        Each turn retires the games that have finished, then advances every game that
+        remains by exactly one ply. The live set shrinks as games finish and never
+        grows again, so the final turns run at low batch occupancy — the long tail the
+        skateboard accepts (epic backlog P3, P4).
+        """
+        games = [_FleetGame[TPosition](position=self._position_factory()) for _ in range(fleet_size)]
+        live = games
+
+        while live:
+            # One batched terminal test per turn serves both jobs: it decides which
+            # games leave the fleet, and the outcome that retires a game is exactly
+            # the one its back-fill needs. It also enforces the engine's precondition
+            # below, where a terminal slot would raise and forfeit every game's search.
+            outcomes = self._batch_ops.outcomes([game.position for game in live])
+            still_live: list[_FleetGame[TPosition]] = []
+            for game, outcome in zip(live, outcomes, strict=True):
+                if outcome is None:
+                    still_live.append(game)
+                else:
+                    game.samples = self._back_fill(game.step_records, float(outcome))
+            # An order-preserving filter, so the live set stays in slot order — which
+            # is what lets a batch index be read back as the game it came from.
+            live = still_live
+            if live:
+                self._play_turn(engine, live)
+
+        return [sample for game in games for sample in game.samples]
+
+    def _play_turn(
+        self, engine: MCTSEngine[TPly, TPosition, Any], live: Sequence[_FleetGame[TPosition]]
+    ) -> None:
+        """Advance every live game by one ply, one batched call per seam.
+
+        Batch index i belongs to live[i] throughout: positions go into the engine in
+        slot order and results come back aligned, so a result never needs to carry its
+        game's identity.
+        """
+        positions = [game.position for game in live]
+        results = engine.select_plies_for_training(positions)
+        plies = [ply for ply, _ in results]
+        policies = [policy for _, policy in results]
+
+        # Frame-correct the visit distributions while the positions — and thus their
+        # active_player_ids — are still in scope. Without a transform the raw str(ply)
+        # distributions are stored verbatim (identity). Note the batch spans several
+        # different games, so a transform may not assume one game per call.
+        if self._policy_transform is not None:
+            policies = self._policy_transform(positions, policies)
+
+        # Record the encoded position and visit distribution for each game's step.
         # Target values are not yet known — they depend on the final game outcome.
-        step_records: list[tuple[Tensor, dict[str, float]]] = []
+        encoded = self._evaluator.encode_positions(positions)
+        for game, encoded_position, policy in zip(live, encoded, policies, strict=True):
+            game.step_records.append((encoded_position, policy))
 
-        while self._batch_ops.outcomes([position])[0] is None:
-            encoded = self._evaluator.encode_positions([position])[0]
-            # A fleet of one: this loop still plays games one at a time, so it drives
-            # the engine's training path at width one. Turning it into a real fleet
-            # driver is issue #24.
-            ply, policy = engine.select_plies_for_training([position])[0]
-            # Frame-correct the visit distribution while the position — and thus its
-            # active_player_id — is still in scope. Without a transform the raw
-            # str(ply) distribution is stored verbatim (identity).
-            if self._policy_transform is not None:
-                policy = self._policy_transform([position], [policy])[0]
-            step_records.append((encoded, policy))
-            position = self._batch_ops.apply_plies([position], [ply])[0]
+        for game, new_position in zip(live, self._batch_ops.apply_plies(positions, plies), strict=True):
+            game.position = new_position
 
-        # Assign target values by propagating the outcome backwards through the game.
-        # The terminal position's outcome is from the perspective of the player who
-        # would move next — i.e. the player who did NOT make the last ply. So the
-        # last recorded step (taken by the other player) has value = -final_outcome,
-        # and the sign alternates for each earlier step.
-        terminal_outcome = self._batch_ops.outcomes([position])[0]
-        assert terminal_outcome is not None
-        final_outcome = float(terminal_outcome)
+    def _back_fill(
+        self, step_records: Sequence[tuple[Tensor, dict[str, float]]], final_outcome: float
+    ) -> list[TrainingSample]:
+        """Turn one finished game's steps into samples, newest step first.
+
+        Assigns target values by propagating the outcome backwards through the game.
+        The terminal position's outcome is from the perspective of the player who
+        would move next — i.e. the player who did NOT make the last ply. So the last
+        recorded step (taken by the other player) has value = -final_outcome, and the
+        sign alternates for each earlier step.
+        """
         samples: list[TrainingSample] = []
         value = -final_outcome
-        for encoded, policy in reversed(step_records):
+        for encoded_position, policy in reversed(step_records):
             samples.append(TrainingSample(
-                encoded_position=encoded,
+                encoded_position=encoded_position,
                 target_value=value,
                 target_policy=policy,
             ))
