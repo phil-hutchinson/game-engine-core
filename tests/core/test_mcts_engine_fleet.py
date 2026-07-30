@@ -18,8 +18,11 @@ against a scalar implementation.
 
 from collections.abc import Sequence
 
+import pytest
+
 from game_engine_core.engines.mcts_engine import MCTSEngine
 from game_engine_core.evaluators.null_evaluator import NullEvaluator
+from game_engine_core.game.batch_position_processor import BatchPositionProcessor
 from game_engine_core.models.position_evaluation import PositionEvaluation
 
 from .nim_fixture import NimPly, NimPosition
@@ -182,6 +185,87 @@ def test_width_one_training_search_agrees_with_the_play_path() -> None:
     trained, _ = training_engine.select_plies_for_training([position])[0]
 
     assert played.take == trained.take
+
+
+class _WidthRecordingBatchProcessor(BatchPositionProcessor[NimPly, NimPosition]):
+    """Records the batch width of every seam call while delegating to the base loop."""
+
+    def __init__(self) -> None:
+        self.legal_plies_widths: list[int] = []
+        self.apply_plies_widths: list[int] = []
+
+    def legal_plies(self, positions: Sequence[NimPosition]) -> Sequence[Sequence[NimPly]]:
+        self.legal_plies_widths.append(len(positions))
+        return super().legal_plies(positions)
+
+    def apply_plies(
+        self, positions: Sequence[NimPosition], plies: Sequence[NimPly]
+    ) -> Sequence[NimPosition]:
+        self.apply_plies_widths.append(len(positions))
+        return super().apply_plies(positions, plies)
+
+
+def test_expansion_builds_every_successor_in_the_fleet_in_one_call() -> None:
+    # One iteration over three deep piles expands all three roots, and each has two
+    # legal plies — six successors in total. They must arrive as a single width-6
+    # call, not six calls of width one and not three calls of width two: a leaf's own
+    # children were already a batch before the fleet existed, and the fleet collapses
+    # those batches together.
+    recorder = _WidthRecordingBatchProcessor()
+    engine = MCTSEngine(
+        evaluator=_WidthRecordingEvaluator(), iterations=1, batch_ops=recorder
+    )
+
+    engine.select_plies_for_training([NimPosition(pile=DEEP_PILE)] * 3)
+
+    assert recorder.apply_plies_widths == [6]
+    # Expansion asks for legality once for the whole fleet too, which #22 already
+    # batched. Only the first entry belongs to expansion; later ones come from
+    # choosing a ply once the search is over.
+    assert recorder.legal_plies_widths[0] == 3
+
+
+def test_the_zero_visit_fallback_still_asks_for_legality_one_slot_at_a_time() -> None:
+    # Documents a known width-one residue rather than endorsing it. A budget of one
+    # expands each root but never descends past it, so every child sits at 0 visits
+    # and the visit distribution falls back to a uniform over legal plies — asked for
+    # per slot, since that fallback was never widened. It fires only when the budget
+    # cannot descend past a root, which is why it is tolerable; if it is ever widened,
+    # this expectation becomes a single width-3 call.
+    recorder = _WidthRecordingBatchProcessor()
+    engine = MCTSEngine(
+        evaluator=_WidthRecordingEvaluator(), iterations=1, batch_ops=recorder
+    )
+
+    engine.select_plies_for_training([NimPosition(pile=DEEP_PILE)] * 3)
+
+    assert recorder.legal_plies_widths[1:] == [1, 1, 1]
+
+
+class _PolicyMissingTakeTwoEvaluator:
+    """Returns a take-1-only policy: complete for pile 1, incomplete for anything larger."""
+
+    def evaluate_positions(self, positions: Sequence[NimPosition]) -> Sequence[PositionEvaluation]:
+        return [PositionEvaluation(value=0.0, policy={"1": 1.0}) for _ in positions]
+
+
+def test_an_incomplete_policy_leaves_every_leaf_in_the_batch_unexpanded() -> None:
+    # Expansion is all-or-nothing across the fleet, not just within one leaf. Slot 0
+    # is pile 1, whose single legal ply the policy covers, so it would expand cleanly
+    # on its own; slot 1 is pile 5, where the missing take-2 entry raises. Because
+    # every prior resolves before any successor is built, the valid slot must be left
+    # unexpanded too — otherwise it would read as expanded and never be evaluated again.
+    engine: MCTSEngine[NimPly, NimPosition, _PolicyMissingTakeTwoEvaluator] = MCTSEngine(
+        evaluator=_PolicyMissingTakeTwoEvaluator(), iterations=5
+    )
+    roots = engine._create_roots(  # pyright: ignore[reportPrivateUsage]
+        [NimPosition(pile=1), NimPosition(pile=5)]
+    )
+
+    with pytest.raises(ValueError, match="'2'"):
+        engine._grow_trees(roots)  # pyright: ignore[reportPrivateUsage]
+
+    assert [root.children for root in roots] == [[], []]
 
 
 def test_the_training_path_retains_nothing_between_calls() -> None:

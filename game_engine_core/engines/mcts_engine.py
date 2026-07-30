@@ -269,7 +269,9 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
 
         Each policy is consumed here and not retained: a prior is only ever read at
         child construction. Evaluators must supply one covering every legal ply (see
-        PositionEvaluation.policy) — the engine has no uniform default.
+        PositionEvaluation.policy) — the engine has no uniform default. An incomplete
+        policy leaves *every* leaf in the batch unexpanded, not just the offending one:
+        priors all resolve before any successor is built.
 
         The caller is responsible for only passing non-terminal leaves, which it
         establishes from the outcomes it already has. Re-checking would mean a second
@@ -281,25 +283,40 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
             [leaf.position for leaf in leaves]
         )
 
+        # Flatten the fleet's expansions into one batch: every expanding leaf's
+        # position repeated against each of its legal plies. Resolving all priors
+        # first is what makes expansion all-or-nothing across the batch — a missing
+        # policy entry raises before a single successor exists.
+        flat_positions: list[TPosition] = []
+        flat_plies: list[TPly] = []
+        flat_priors: list[float] = []
         for leaf, evaluation, legal_plies in zip(leaves, evaluations, batch_legal_plies, strict=True):
-            # Build the children before attaching any, so an incomplete policy leaves
-            # the leaf an unexpanded leaf rather than a half-expanded one.
-            children: list[MCTSNode[TPosition, TPly]] = []
             for legal_ply in legal_plies:
                 ply_key = str(legal_ply)
                 try:
-                    prior = evaluation.policy[ply_key]
+                    flat_priors.append(evaluation.policy[ply_key])
                 except KeyError:
                     raise ValueError(f"Policy missing entry for ply '{ply_key}'") from None
-                new_position = self._batch_ops.apply_plies([leaf.position], [legal_ply])[0]
-                children.append(MCTSNode(
-                    position=new_position,
-                    parent=leaf,
-                    ply_from_parent=legal_ply,
-                    prior=prior,
-                ))
+                flat_positions.append(leaf.position)
+                flat_plies.append(legal_ply)
 
-            leaf.children.extend(children)
+        # One call spanning every expanding leaf in the fleet, index-paired rather
+        # than a cross product. A leaf's own children were already a batch before the
+        # fleet existed; the fleet collapses those batches into this single call.
+        successors = self._batch_ops.apply_plies(flat_positions, flat_plies)
+
+        # Walk the flat results back out to their leaves. offset is the lane map at
+        # this level, the way pending is one frame up.
+        offset = 0
+        for leaf, legal_plies in zip(leaves, batch_legal_plies, strict=True):
+            end = offset + len(legal_plies)
+            leaf.children.extend(
+                MCTSNode(position=position, parent=leaf, ply_from_parent=legal_ply, prior=prior)
+                for position, legal_ply, prior in zip(
+                    successors[offset:end], legal_plies, flat_priors[offset:end], strict=True
+                )
+            )
+            offset = end
 
     def _backpropagate(self, node: MCTSNode[TPosition, TPly], value: float) -> None:
         """Update statistics for this node and all ancestors."""
