@@ -115,6 +115,30 @@ def test_policy_transform_receives_positions_and_policies_paired_by_index() -> N
     assert all(sample.target_policy == {"row0:1": 1.0} for sample in samples)
 
 
+def test_one_engine_serves_every_game_in_the_collect() -> None:
+    # The fleet hands one engine every live game's position at once, so the engine
+    # is per-collect rather than per-game. Safe because the training path retains
+    # nothing between calls, and required because lockstep needs a single shared
+    # iteration budget.
+    engines: list[MCTSEngine[NimPly, NimPosition, Any]] = []
+
+    def engine_factory() -> MCTSEngine[NimPly, NimPosition, Any]:
+        engine: MCTSEngine[NimPly, NimPosition, Any] = MCTSEngine(
+            evaluator=NullEvaluator(), iterations=10
+        )
+        engines.append(engine)
+        return engine
+
+    collector = SelfPlayCollector(
+        evaluator=NimNNEvaluator(model=NimMLP()),
+        engine_factory=engine_factory,
+        position_factory=lambda: NimPosition(pile=3, takes=(1,)),
+    )
+    collector.collect(n_games=3)
+
+    assert len(engines) == 1
+
+
 def test_collect_accumulates_across_games() -> None:
     samples = _collector(starting_pile=3).collect(n_games=2)
     assert len(samples) == 6

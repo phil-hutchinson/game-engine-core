@@ -50,8 +50,14 @@ class SelfPlayCollector[TPly: GamePly, TPosition: GamePosition[Any]]:
 
     Args:
         evaluator: Used to encode each position into a tensor for the training sample.
-        engine_factory: Called once per game to produce the MCTS engine. Allows the
-            caller to control iterations, temperature, and evaluator per game.
+        engine_factory: Called once per collect() to produce the MCTS engine that
+            searches every game. Allows the caller to control iterations, temperature
+            and evaluator, but not per game: all games share the one engine, and
+            therefore its iteration budget — which is what keeps them in lockstep.
+            The engine must retain no per-game state on the training path. MCTSEngine
+            satisfies this by construction (its fleet roots are call-scoped, and the
+            retained _root_node belongs to select_ply, which is never called here);
+            a subclass relying on per-game construction to clear state would not.
         position_factory: Called once per game to produce the starting position.
         policy_transform: Optional hook to re-express each step's MCTS visit
             distribution while the position is still in scope. Defaults to None
@@ -79,13 +85,13 @@ class SelfPlayCollector[TPly: GamePly, TPosition: GamePosition[Any]]:
 
     def collect(self, n_games: int) -> list[TrainingSample]:
         """Play n_games complete games and return all resulting TrainingSamples."""
+        engine = self._engine_factory()
         samples: list[TrainingSample] = []
         for _ in range(n_games):
-            samples.extend(self._play_game())
+            samples.extend(self._play_game(engine))
         return samples
 
-    def _play_game(self) -> list[TrainingSample]:
-        engine = self._engine_factory()
+    def _play_game(self, engine: MCTSEngine[TPly, TPosition, Any]) -> list[TrainingSample]:
         position = self._position_factory()
 
         # At each step, record the encoded position and the MCTS visit distribution.
