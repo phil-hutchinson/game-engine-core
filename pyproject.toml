@@ -6,11 +6,15 @@ build-backend = "setuptools.build_meta"
 name = "game-engine-core"
 version = "0.1.0"
 requires-python = ">=3.12"
+# The MCTS tree stores child statistics as parallel arrays on the parent and
+# scores PUCT over them in one vectorised op (issue #26), so numpy is a runtime
+# requirement of game_engine_core itself, not just of the learning extra. It
+# also covers the "numpy not found" warning torch emits on import, which is why
+# the learning extra no longer pins it separately.
+dependencies = ["numpy"]
 
 [project.optional-dependencies]
-# numpy isn't imported directly by game_engine_learning; it's pinned here to silence
-# torch's "numpy not found" warning on import.
-learning = ["torch>=2.0", "numpy"]
+learning = ["torch>=2.0"]
 
 [tool.setuptools.packages.find]
 where = ["."]

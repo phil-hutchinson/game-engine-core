@@ -75,6 +75,7 @@ Within a game, `MCTSEngine` retains its search tree between plies: `StandardGame
 ## Requirements
 
 - Python 3.12+
+- NumPy
 - PyTorch 2.0+ (only required for `game_engine_learning`)
 
 ## Installation
