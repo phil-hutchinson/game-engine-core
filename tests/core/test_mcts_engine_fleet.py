@@ -182,6 +182,9 @@ def test_each_slot_gets_its_own_tree_and_its_own_iteration_budget() -> None:
 
     assert [root.visits for root in roots] == [8, 8]
     assert roots[0] is not roots[1]
+    # The statistics arrays are where a shared tree would show up now that a
+    # child's visits and values live on its parent rather than on itself.
+    assert roots[0].child_visits is not roots[1].child_visits
     assert roots[0].children[0] is not roots[1].children[0]
 
 
@@ -281,7 +284,7 @@ def test_an_incomplete_policy_leaves_every_leaf_in_the_batch_unexpanded() -> Non
     with pytest.raises(ValueError, match="'2'"):
         engine._grow_trees(roots)  # pyright: ignore[reportPrivateUsage]
 
-    assert [root.children for root in roots] == [[], []]
+    assert [root.child_count for root in roots] == [0, 0]
 
 
 def test_the_training_path_retains_nothing_between_calls() -> None:

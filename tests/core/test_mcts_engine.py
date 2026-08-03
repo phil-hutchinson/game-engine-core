@@ -24,6 +24,15 @@ def _engine(iterations: int, temperature: float = 0.0) -> NimMCTSEngine:
     )
 
 
+def _slot_of(root: MCTSNode[NimPosition, NimPly], ply: str) -> int:
+    """The slot a ply occupies in a node's arrays.
+
+    Children are slots rather than objects, so a test that wants a particular
+    ply's statistics looks its slot up here and indexes the parent's arrays.
+    """
+    return next(slot for slot, slot_ply in enumerate(root.child_plies) if str(slot_ply) == ply)
+
+
 def test_forced_win_in_one_is_found() -> None:
     assert _engine(iterations=200).select_ply(NimPosition(pile=2)).take == 2
 
@@ -35,21 +44,21 @@ def test_search_values_carry_correct_signs() -> None:
     root = engine._create_root(NimPosition(pile=2))  # pyright: ignore[reportPrivateUsage]
     engine._grow_trees([root])  # pyright: ignore[reportPrivateUsage]
 
-    children = {str(child.ply_from_parent): child for child in root.children}
-    assert set(children) == {"1", "2"}
+    assert {str(ply) for ply in root.child_plies} == {"1", "2"}
+    take_one, take_two = _slot_of(root, "1"), _slot_of(root, "2")
 
     # The take-2 child is terminal: every visit evaluates to its exact outcome,
     # -1 from the perspective of the player who just lost.
-    assert children["2"].average_value == -1.0
+    assert root.child_average_value(take_two) == -1.0
     # From the root mover's perspective the position is winning.
     assert root.average_value > 0
     # The winning ply attracts the visits.
-    assert children["2"].visits > children["1"].visits
+    assert root.child_visits[take_two] > root.child_visits[take_one]
     # Visit accounting: every iteration's backpropagation path passes through the
     # root, but the first iteration stops at the root itself (evaluating and
     # expanding it), so only the remaining 99 reach a child.
     assert root.visits == 100
-    assert children["1"].visits + children["2"].visits == 99
+    assert root.child_visits.sum() == 99
 
 
 def test_select_ply_on_position_without_plies_raises() -> None:
@@ -95,12 +104,19 @@ def test_visit_distribution_uniform_fallback_without_visits() -> None:
 def test_backpropagation_alternates_value_sign_per_level() -> None:
     # Drives the private _backpropagate directly: the per-level sign flip is the
     # convention under test and is not observable through the public API.
+    # Built through expand/attach_children rather than by hand, so each node ends
+    # up addressing its statistics through its parent's arrays the way the search
+    # would leave it — which is the storage the sign flip has to land in.
     engine = _engine(iterations=0)
     root: MCTSNode[NimPosition, NimPly] = MCTSNode(
         position=NimPosition(pile=3), parent=None, ply_from_parent=None
     )
-    mid = MCTSNode(position=NimPosition(pile=2), parent=root, ply_from_parent=NimPly(1))
-    leaf = MCTSNode(position=NimPosition(pile=1), parent=mid, ply_from_parent=NimPly(1))
+    root.expand([NimPly(1)], [1.0])
+    root.attach_children([NimPosition(pile=2)])
+    mid = root.children[0]
+    mid.expand([NimPly(1)], [1.0])
+    mid.attach_children([NimPosition(pile=1)])
+    leaf = mid.children[0]
 
     engine._backpropagate(leaf, 1.0)  # pyright: ignore[reportPrivateUsage]
 
@@ -142,10 +158,14 @@ def test_first_iteration_evaluates_the_root_and_attaches_every_child() -> None:
 
     assert evaluator.calls == 1
     assert root.visits == 1
-    priors = {str(child.ply_from_parent): child.prior for child in root.children}
+    # The priors array *is* the policy, positional rather than string-keyed.
+    priors = {
+        str(ply): float(prior)
+        for ply, prior in zip(root.child_plies, root.child_priors, strict=True)
+    }
     assert priors == {"1": 0.25, "2": 0.75}
     # Expansion alone confers no visits: the value backpropagated is the root's.
-    assert [child.visits for child in root.children] == [0, 0]
+    assert [int(visits) for visits in root.child_visits] == [0, 0]
 
 
 def test_zero_visit_root_children_are_ranked_by_prior() -> None:
@@ -171,7 +191,9 @@ def test_a_dominant_prior_is_reselected_while_its_sibling_stays_unvisited() -> N
     root = engine._create_root(NimPosition(pile=20))  # pyright: ignore[reportPrivateUsage]
     engine._grow_trees([root])  # pyright: ignore[reportPrivateUsage]
 
-    visits = {str(child.ply_from_parent): child.visits for child in root.children}
+    visits = {
+        str(ply): int(count) for ply, count in zip(root.child_plies, root.child_visits, strict=True)
+    }
     assert visits == {"1": 4, "2": 0}
 
 
@@ -193,10 +215,9 @@ def test_terminal_leaves_are_scored_from_their_outcome_without_evaluating() -> N
     engine._grow_trees([root])  # pyright: ignore[reportPrivateUsage]
 
     assert evaluator.calls == 1
-    terminal_child = root.children[0]
-    assert terminal_child.visits == 4
+    assert root.child_visits[0] == 4
     # -1 from the perspective of the player left facing the empty pile.
-    assert terminal_child.average_value == -1.0
+    assert root.child_average_value(0) == -1.0
 
 
 class _IncompletePolicyEvaluator:
@@ -217,8 +238,8 @@ def test_policy_missing_a_legal_ply_raises() -> None:
 
 
 def test_incomplete_policy_leaves_the_node_unexpanded() -> None:
-    # Expansion is all-or-nothing. A node left holding the children created
-    # before the bad ply would read as expanded and never be evaluated again.
+    # Expansion is all-or-nothing. A node left holding the slots created before
+    # the bad ply would read as expanded and never be evaluated again.
     engine: MCTSEngine[NimPly, NimPosition, _IncompletePolicyEvaluator] = MCTSEngine(
         evaluator=_IncompletePolicyEvaluator(), iterations=50
     )
@@ -227,7 +248,7 @@ def test_incomplete_policy_leaves_the_node_unexpanded() -> None:
     with pytest.raises(ValueError):
         engine._grow_trees([root])  # pyright: ignore[reportPrivateUsage]
 
-    assert root.children == []
+    assert root.child_count == 0
 
 
 def test_temperature_zero_picks_most_visited_ply() -> None:
@@ -237,12 +258,11 @@ def test_temperature_zero_picks_most_visited_ply() -> None:
     root: MCTSNode[NimPosition, NimPly] = MCTSNode(
         position=NimPosition(pile=5), parent=None, ply_from_parent=None
     )
-    root.children = [
-        MCTSNode(position=NimPosition(pile=4, active_player_id=-1), parent=root,
-                 ply_from_parent=NimPly(1), visits=5),
-        MCTSNode(position=NimPosition(pile=3, active_player_id=-1), parent=root,
-                 ply_from_parent=NimPly(2), visits=10),
-    ]
+    root.expand([NimPly(1), NimPly(2)], [0.5, 0.5])
+    root.attach_children(
+        [NimPosition(pile=4, active_player_id=-1), NimPosition(pile=3, active_player_id=-1)]
+    )
+    root.child_visits[:] = [5, 10]
 
     assert engine._choose_plies([root])[0].take == 2  # pyright: ignore[reportPrivateUsage]
 
@@ -258,11 +278,11 @@ def test_observe_ply_rerroots_onto_matching_child_preserving_subtree() -> None:
     selected = engine.select_ply(position)
     root = engine._root_node  # pyright: ignore[reportPrivateUsage]
     assert root is not None
-    matching_child = next(
-        child for child in root.children if str(child.ply_from_parent) == str(selected)
-    )
+    matching_child = root.children[_slot_of(root, str(selected))]
+    # Read out before re-rooting: until then these live in the old root's arrays,
+    # which is exactly what detaching has to carry across.
     expected_visits = matching_child.visits
-    expected_children = matching_child.children
+    expected_child_plies = matching_child.child_plies
     assert expected_visits > 0  # otherwise this test can't tell retention from a reset
 
     new_position = position.apply_ply(selected)
@@ -272,14 +292,17 @@ def test_observe_ply_rerroots_onto_matching_child_preserving_subtree() -> None:
     assert new_root is matching_child
     assert new_root is not None
     assert new_root.parent is None
+    assert new_root.slot is None
     assert new_root.ply_from_parent is None
+    # The statistics survived the move out of the discarded parent's arrays and
+    # into the node's own root scalars.
     assert new_root.visits == expected_visits
-    assert new_root.children is expected_children
+    assert new_root.child_plies is expected_child_plies
 
 
 def test_observe_ply_miss_clears_root_and_rebuilds() -> None:
     # Full expansion makes a miss on a *legal* ply impossible: once the root has
-    # been evaluated every legal ply is a child, so the branch can only be reached
+    # been evaluated every legal ply has a slot, so the branch can only be reached
     # by a ply the tree has never seen. Constructed here with a take of 3, outside
     # the position's permitted takes, since no search can produce one.
     engine = _engine(iterations=10)
@@ -287,7 +310,7 @@ def test_observe_ply_miss_clears_root_and_rebuilds() -> None:
     engine.select_ply(position)
     root = engine._root_node  # pyright: ignore[reportPrivateUsage]
     assert root is not None
-    assert {child.ply_from_parent.take for child in root.children} == {1, 2}  # type: ignore[union-attr]
+    assert {ply.take for ply in root.child_plies} == {1, 2}
     unseen_ply = NimPly(3)
     new_position = NimPosition(pile=2, active_player_id=-1)
 

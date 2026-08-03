@@ -59,3 +59,33 @@ Two things worth noting before the comparisons start:
   narrow one** (18k vs 33k iters/s), at a branching factor of at most 9 against
   2. That gap is the eager-expansion and scalar-descent cost the story is aimed
   at, and it is the cell where a win is expected.
+
+## Step 2 — statistics moved onto the parent as slot-indexed arrays
+
+Still a scalar selection loop, now reading from the arrays by slot instead of
+from child objects. Nothing about search behaviour changed and the signatures
+confirm it.
+
+| cell | fleet | wall (s) | iters/s | vs baseline | signature |
+|---|---:|---:|---:|---:|---|
+| narrow (nim) | 1 | 0.0376 | 21,292 | −35% | `dc8e8031` |
+| narrow (nim) | 64 | 2.7342 | 18,726 | −40% | `efd7b510` |
+| wide (tictactoe) | 1 | 0.0581 | 13,778 | −23% | `509ce670` |
+| wide (tictactoe) | 64 | 4.3394 | 11,799 | −26% | `8f8f1ab7` |
+
+**All four signatures are unchanged from the baseline.** This is the step that
+moved every statistic to a new home, so it was the one most likely to move a
+search result, and it did not.
+
+The regression is expected and is the cost of the intermediate state, not of the
+representation: a scalar loop now pays numpy's per-element indexing overhead on
+every read where it previously did a Python attribute lookup, and gets none of
+the vectorisation back until Step 3. A profile of the wide cell puts
+`child_puct_value`, `child_average_value` and the `visits` property at 36% of
+total runtime — precisely the code Step 3 replaces with a single array
+computation. `record_visit` does not reach the top ten, so backpropagation's move
+into the arrays is not a material cost.
+
+One number worth carrying into Step 3: `visits` was called 98,424 times in that
+profile, once per slot scored, to recompute a parent visit count that is constant
+across the whole loop. Vectorising hoists it out by construction.

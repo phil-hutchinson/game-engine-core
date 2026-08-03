@@ -6,50 +6,157 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+import numpy as np
+from numpy.typing import NDArray
+
 from ..game.batch_position_processor import BatchPositionProcessor
 from ..models.position_evaluation import PositionEvaluation
 from ..protocols.game_ply import GamePly
 from ..protocols.game_position import GamePosition
 from ..protocols.position_evaluator import PositionEvaluator
 
+# Every unexpanded node shares these rather than allocating three zero-length
+# arrays it will immediately throw away at expansion. Read-only so a stray write
+# through one node cannot reach another; expansion replaces them outright.
+_NO_PRIORS: NDArray[np.float64] = np.zeros(0, dtype=np.float64)
+_NO_VISITS: NDArray[np.int64] = np.zeros(0, dtype=np.int64)
+_NO_VALUES: NDArray[np.float64] = np.zeros(0, dtype=np.float64)
+for _empty in (_NO_PRIORS, _NO_VISITS, _NO_VALUES):
+    _empty.setflags(write=False)
+
 
 @dataclass
 class MCTSNode[TPosition: GamePosition[Any], TPly: GamePly]:
-    """A node in the MCTS tree."""
+    """A node in the MCTS tree, holding its children's statistics as arrays.
+
+    A child is not an object carrying its own scalars: it is a *slot*, an index
+    into this node's parallel ``child_*`` arrays, ordered by the legal plies in
+    ``child_plies``. The priors array is the policy itself — dense and
+    positional, rather than keyed by ``str(ply)``.
+
+    Those arrays are the single copy of a child's statistics. A materialised
+    child addresses them through its own ``(parent, slot)`` pair rather than
+    holding duplicates: mirroring the values on both the node and the parent
+    array would be simpler to write and would drift the first time a code path
+    updated only one of them.
+
+    A root is the exception, having no parent to read through, and keeps its own
+    scalars. ``slot`` is None exactly when ``parent`` is None, which is what
+    makes each accessor below a clean either/or.
+
+    A node with no slots is a leaf, whether because it has not been expanded or
+    because it is terminal and never will be.
+    """
 
     position: TPosition
     parent: MCTSNode[TPosition, TPly] | None
     ply_from_parent: TPly | None  # ply that led to this position
+    slot: int | None = None  # index of this node in its parent's arrays
+
+    # The children, in slot order. Empty until this node is expanded.
+    child_plies: list[TPly] = field(default_factory=lambda: [])
+    child_priors: NDArray[np.float64] = field(default_factory=lambda: _NO_PRIORS)
+    child_visits: NDArray[np.int64] = field(default_factory=lambda: _NO_VISITS)
+    child_total_values: NDArray[np.float64] = field(default_factory=lambda: _NO_VALUES)
     children: list[MCTSNode[TPosition, TPly]] = field(default_factory=lambda: [])
 
-    # MCTS statistics
-    visits: int = 0
-    total_value: float = 0.0
+    # A root's own statistics, read only while ``parent`` is None. Everything
+    # else reads its counterparts out of its parent's arrays.
+    root_visits: int = 0
+    root_total_value: float = 0.0
 
-    # Share of the parent's policy mass for the ply leading here, set when the
-    # parent was expanded. Drives the PUCT exploration term. A root's own prior
-    # is never read, since selection only ever scores children.
-    prior: float = 1.0
+    @property
+    def child_count(self) -> int:
+        """Number of slots, which is the number of legal plies once expanded."""
+        return len(self.child_plies)
+
+    @property
+    def visits(self) -> int:
+        """Visit count for this node, read through its slot in its parent."""
+        if self.parent is None:
+            return self.root_visits
+        assert self.slot is not None
+        return int(self.parent.child_visits[self.slot])
+
+    @property
+    def total_value(self) -> float:
+        """Accumulated value for this node, read through its slot in its parent."""
+        if self.parent is None:
+            return self.root_total_value
+        assert self.slot is not None
+        return float(self.parent.child_total_values[self.slot])
 
     @property
     def average_value(self) -> float:
         """Average value from this node's perspective."""
-        if self.visits == 0:
+        visits = self.visits
+        if visits == 0:
             return 0.0
-        return self.total_value / self.visits
+        return self.total_value / visits
 
-    def puct_value(self, exploration_constant: float = 1.41) -> float:
-        """PUCT selection score.
+    def record_visit(self, value: float) -> None:
+        """Add one visit and ``value`` wherever this node's statistics live."""
+        if self.parent is None:
+            self.root_visits += 1
+            self.root_total_value += value
+            return
+        assert self.slot is not None
+        self.parent.child_visits[self.slot] += 1
+        self.parent.child_total_values[self.slot] += value
+
+    def child_average_value(self, slot: int) -> float:
+        """Average value of a child slot, from that child's perspective."""
+        visits = int(self.child_visits[slot])
+        if visits == 0:
+            return 0.0
+        return float(self.child_total_values[slot]) / visits
+
+    def child_puct_value(self, slot: int, exploration_constant: float = 1.41) -> float:
+        """PUCT selection score for one of this node's child slots.
+
+        Scored from the parent rather than from the child, since the parent holds
+        every term: the child's statistics, its prior, and the parent visit count
+        the exploration term scales by. It also means a slot can be scored
+        without a child object existing for it.
 
         Note this is not UCT with priors: the exploration term is finite at zero
         visits, so an unvisited sibling can stay unvisited indefinitely while a
         high-prior ply is re-selected. Uniform priors do not recover UCB1, whose
         exploration term is unbounded as visits approach zero.
         """
-        assert self.parent is not None
-        exploitation = -self.average_value
-        exploration = exploration_constant * self.prior * math.sqrt(self.parent.visits) / (1 + self.visits)
+        visits = int(self.child_visits[slot])
+        exploitation = -self.child_average_value(slot)
+        exploration = exploration_constant * float(self.child_priors[slot]) * math.sqrt(self.visits) / (1 + visits)
         return exploitation + exploration
+
+    def expand(self, plies: list[TPly], priors: Sequence[float]) -> None:
+        """Give this node one slot per legal ply, priced by the policy."""
+        self.child_plies = plies
+        self.child_priors = np.array(priors, dtype=np.float64)
+        self.child_visits = np.zeros(len(plies), dtype=np.int64)
+        self.child_total_values = np.zeros(len(plies), dtype=np.float64)
+
+    def attach_children(self, positions: Sequence[TPosition]) -> None:
+        """Materialise a child node per slot, from the successor positions in slot order."""
+        self.children = [
+            MCTSNode(position=position, parent=self, ply_from_parent=ply, slot=slot)
+            for slot, (position, ply) in enumerate(zip(positions, self.child_plies, strict=True))
+        ]
+
+    def detach_as_root(self) -> None:
+        """Promote this node to a root, bringing its statistics with it.
+
+        Its parent holds the only copy of them and is about to be dropped, so
+        they have to be read across before the link is broken — a root carries
+        its own scalars precisely because it has no slot to read through.
+        """
+        if self.parent is None:
+            return
+        self.root_visits = self.visits
+        self.root_total_value = self.total_value
+        self.parent = None
+        self.slot = None
+        self.ply_from_parent = None
 
 
 class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: PositionEvaluator[Any, Any]]:
@@ -90,17 +197,23 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
         if self._root_node is None:
             return
 
-        new_root = next((node for node in self._root_node.children if str(node.ply_from_parent) == str(ply)), None)
-        if new_root is None:
+        # Matched against the root's slot plies rather than against child objects:
+        # the slots are the tree's record of what is legal here, and the child
+        # objects are only their materialisation.
+        new_slot = next(
+            (slot for slot, slot_ply in enumerate(self._root_node.child_plies) if str(slot_ply) == str(ply)),
+            None,
+        )
+        if new_slot is None:
             # Unreachable through legal play against a searched root: full
-            # expansion gives every legal ply a child. Only a ply the tree never
+            # expansion gives every legal ply a slot. Only a ply the tree never
             # saw — an illegal one, or any ply if the root was never searched —
             # lands here, and the tree is discarded rather than mis-rooted.
             self._root_node = None
             return
 
-        new_root.parent = None
-        new_root.ply_from_parent = None
+        new_root = self._root_node.children[new_slot]
+        new_root.detach_as_root()
         self._root_node = new_root
 
     def reset(self) -> None:
@@ -203,16 +316,17 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
         since reaching the other two would mean restructuring ply choice into a plural
         form as well.
         """
+        # Back to str(ply) keying here: the returned distribution is a public
+        # contract and stays a dict, so the slot ordering is only internal.
         child_visits: dict[str, int] = {
-            str(child.ply_from_parent): child.visits
-            for child in root.children
-            if child.ply_from_parent is not None
+            str(slot_ply): int(visits)
+            for slot_ply, visits in zip(root.child_plies, root.child_visits, strict=True)
         }
         total = sum(child_visits.values())
         if total == 0:
             # No counts to normalise: either the root was never expanded, or it
             # was expanded but no iteration descended past it. Only this branch
-            # needs the legal plies, since an unexpanded root has no children.
+            # needs the legal plies, since an unexpanded root has no slots.
             legal_plies = list(self._batch_ops.legal_plies([root.position])[0])
             return {str(ply): 1.0 / len(legal_plies) for ply in legal_plies}
         return {k: v / total for k, v in child_visits.items()}
@@ -261,8 +375,8 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
     def _select_leaves(self, roots: Sequence[MCTSNode[TPosition, TPly]]) -> Sequence[MCTSNode[TPosition, TPly]]:
         """Descend by PUCT to one leaf per tree, returned in the order the roots came in.
 
-        A leaf is a node with no children: either a node not yet evaluated, or a
-        terminal one — which never gains children and so is reached as a leaf on
+        A leaf is a node with no slots: either a node not yet evaluated, or a
+        terminal one — which never gains slots and so is reached as a leaf on
         every iteration it wins.
 
         The slot ordering is load-bearing. Everything downstream pairs these leaves
@@ -274,9 +388,12 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
         for root in roots:
             current = root
 
-            while current.children:
-                best_child = max(current.children, key=lambda child: child.puct_value())
-                current = best_child
+            while current.child_count:
+                # Scanning slots in order and keeping the first maximum is exactly
+                # what max() over child objects did, ties included: both keep the
+                # earliest legal ply among equals.
+                best_slot = max(range(current.child_count), key=current.child_puct_value)
+                current = current.children[best_slot]
 
             leaves.append(current)
 
@@ -287,18 +404,19 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
         leaves: Sequence[MCTSNode[TPosition, TPly]],
         evaluations: Sequence[PositionEvaluation],
     ) -> None:
-        """Attach a child per legal ply to every leaf, priced by its evaluation's policy.
+        """Give every leaf a slot per legal ply, priced by its evaluation's policy.
 
         Pairs ``leaves`` with ``evaluations`` by index. Both arrive already narrowed to
         the non-terminal leaves of one iteration, so this method works entirely in that
         narrowed space and never sees a slot index — mapping results back to games is
         the caller's business.
 
-        Each policy is consumed here and not retained: a prior is only ever read at
-        child construction. Evaluators must supply one covering every legal ply (see
-        PositionEvaluation.policy) — the engine has no uniform default. An incomplete
-        policy leaves *every* leaf in the batch unexpanded, not just the offending one:
-        priors all resolve before any successor is built.
+        This is the one place ``PositionEvaluation.policy``'s ``str(ply)`` keying is
+        consumed: the policy is read into the leaf's priors array, positionally by
+        slot, and the string keys end here. Evaluators must supply an entry covering
+        every legal ply (see PositionEvaluation.policy) — the engine has no uniform
+        default. An incomplete policy leaves *every* leaf in the batch unexpanded,
+        not just the offending one: priors all resolve before any node is expanded.
 
         The caller is responsible for only passing non-terminal leaves, which it
         establishes from the outcomes it already has. Re-checking would mean a second
@@ -351,12 +469,8 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
         offset = 0
         for leaf, legal_plies in zip(leaves, batch_legal_plies, strict=True):
             end = offset + len(legal_plies)
-            leaf.children.extend(
-                MCTSNode(position=position, parent=leaf, ply_from_parent=legal_ply, prior=prior)
-                for position, legal_ply, prior in zip(
-                    successors[offset:end], legal_plies, flat_priors[offset:end], strict=True
-                )
-            )
+            leaf.expand(list(legal_plies), flat_priors[offset:end])
+            leaf.attach_children(successors[offset:end])
             offset = end
 
     def _backpropagate(self, node: MCTSNode[TPosition, TPly], value: float) -> None:
@@ -364,8 +478,7 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
         current: MCTSNode[TPosition, TPly] | None = node
 
         while current is not None:
-            current.visits += 1
-            current.total_value += value
+            current.record_visit(value)
             current = current.parent
             value = -value
 
@@ -376,19 +489,21 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
         root with a budget too small to descend past it — where it returns the
         highest-prior ply instead of the first one in legal order.
         """
-        if not root.children:
+        if not root.child_count:
             plies = list(self._batch_ops.legal_plies([root.position])[0])
             if not plies:
                 raise RuntimeError("No available plies - position should have been treated as terminal.")
             return random.choice(plies)
 
-        best_child = max(root.children, key=lambda child: (child.visits, child.prior))
-        assert best_child.ply_from_parent is not None
-        return best_child.ply_from_parent
+        best_slot = max(
+            range(root.child_count),
+            key=lambda slot: (int(root.child_visits[slot]), float(root.child_priors[slot])),
+        )
+        return root.child_plies[best_slot]
 
     def _select_best_ply_with_temperature(self, root: MCTSNode[TPosition, TPly], temperature: float) -> TPly:
         """Select ply proportionally to visit counts, scaled by temperature."""
-        if not root.children:
+        if not root.child_count:
             if self.verbose:
                 print('No children. Choosing randomly.')
             plies = list(self._batch_ops.legal_plies([root.position])[0])
@@ -396,26 +511,23 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
                 raise RuntimeError("No available plies - position should have been treated as terminal.")
             return random.choice(plies)
 
-        visit_counts = [child.visits for child in root.children]
+        visit_counts = [int(visits) for visits in root.child_visits]
         total_visits = sum(visit_counts)
 
         if total_visits == 0:
             if self.verbose:
                 print('No visits. Choosing randomly.')
-            plies = [child.ply_from_parent for child in root.children]
-            assert all(p is not None for p in plies)
-            return random.choice(plies)  # type: ignore[return-value]
+            return random.choice(root.child_plies)
 
         probabilities = [(v / total_visits) ** (1.0 / temperature) for v in visit_counts]
         total_prob = sum(probabilities)
         probabilities = [p / total_prob for p in probabilities]
 
         if self.verbose:
-            plies = [child.ply_from_parent for child in root.children]
-            scores = [child.average_value for child in root.children]
+            scores = [root.child_average_value(slot) for slot in range(root.child_count)]
             prob_percentages = [f"{p*100:.3f}%" for p in probabilities]
             combined = sorted(
-                zip(plies, visit_counts, scores, probabilities, prob_percentages, strict=True),
+                zip(root.child_plies, visit_counts, scores, probabilities, prob_percentages, strict=True),
                 key=lambda x: x[3], reverse=True
             )
             parts = [f"({ply}, {v}, {s}, {pct})" for ply, v, s, _, pct in combined]
@@ -423,14 +535,11 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
 
         rand_val = random.random()
         cumulative = 0.0
-        for i, prob in enumerate(probabilities):
+        for slot, prob in enumerate(probabilities):
             cumulative += prob
             if rand_val <= cumulative:
-                assert root.children[i].ply_from_parent is not None
-                return root.children[i].ply_from_parent  # type: ignore[return-value]
+                return root.child_plies[slot]
 
         if self.verbose:
             print("Fallback to random.")
-        result = random.choice(root.children).ply_from_parent
-        assert result is not None
-        return result
+        return random.choice(root.child_plies)
