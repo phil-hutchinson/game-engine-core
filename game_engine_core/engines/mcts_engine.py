@@ -111,8 +111,8 @@ class MCTSNode[TPosition: GamePosition[Any], TPly: GamePly]:
             return 0.0
         return float(self.child_total_values[slot]) / visits
 
-    def child_puct_value(self, slot: int, exploration_constant: float = 1.41) -> float:
-        """PUCT selection score for one of this node's child slots.
+    def child_puct_values(self, exploration_constant: float = 1.41) -> NDArray[np.float64]:
+        """PUCT selection scores for every one of this node's child slots, as an array.
 
         Scored from the parent rather than from the child, since the parent holds
         every term: the child's statistics, its prior, and the parent visit count
@@ -124,9 +124,20 @@ class MCTSNode[TPosition: GamePosition[Any], TPly: GamePly]:
         high-prior ply is re-selected. Uniform priors do not recover UCB1, whose
         exploration term is unbounded as visits approach zero.
         """
-        visits = int(self.child_visits[slot])
-        exploitation = -self.child_average_value(slot)
-        exploration = exploration_constant * float(self.child_priors[slot]) * math.sqrt(self.visits) / (1 + visits)
+        # exploitation
+        average_values = np.zeros_like(self.child_total_values)
+        np.divide(
+            self.child_total_values,
+            self.child_visits,
+            where=(self.child_visits != 0),
+            out = average_values,
+        )
+        exploitation = -average_values
+
+        # exploration
+        all_visits_sqrt = math.sqrt(self.visits)
+        exploration = exploration_constant * self.child_priors * all_visits_sqrt / (self.child_visits + 1)
+
         return exploitation + exploration
 
     def expand(self, plies: list[TPly], priors: Sequence[float]) -> None:
@@ -389,10 +400,9 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
             current = root
 
             while current.child_count:
-                # Scanning slots in order and keeping the first maximum is exactly
-                # what max() over child objects did, ties included: both keep the
-                # earliest legal ply among equals.
-                best_slot = max(range(current.child_count), key=current.child_puct_value)
+                # argmax returns the first maximal index, so an exact tie keeps the
+                # earliest legal ply rather than breaking randomly.
+                best_slot = int(np.argmax(current.child_puct_values()))
                 current = current.children[best_slot]
 
             leaves.append(current)

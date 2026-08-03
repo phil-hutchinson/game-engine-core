@@ -5,8 +5,11 @@ the search a known-correct answer. The null evaluator (value 0, no policy) keeps
 all signal coming from terminal outcomes, which is exactly what these tests pin.
 """
 
+import math
+import random
 from collections.abc import Sequence
 
+import numpy as np
 import pytest
 
 from game_engine_core.engines.mcts_engine import MCTSEngine, MCTSNode
@@ -195,6 +198,79 @@ def test_a_dominant_prior_is_reselected_while_its_sibling_stays_unvisited() -> N
         str(ply): int(count) for ply, count in zip(root.child_plies, root.child_visits, strict=True)
     }
     assert visits == {"1": 4, "2": 0}
+
+
+def _node_with_child_stats(
+    parent_visits: int, priors: list[float], visits: list[int], total_values: list[float]
+) -> MCTSNode[NimPosition, NimPly]:
+    """A root carrying arbitrary child statistics, for exercising selection directly.
+
+    child_puct_values only reads the parent's arrays and its own visit count, so
+    the children never need real successor positions or objects of their own.
+    """
+    node: MCTSNode[NimPosition, NimPly] = MCTSNode(
+        position=NimPosition(pile=99), parent=None, ply_from_parent=None
+    )
+    node.root_visits = parent_visits
+    node.child_plies = [NimPly(1) for _ in priors]
+    node.child_priors = np.array(priors, dtype=np.float64)
+    node.child_visits = np.array(visits, dtype=np.int64)
+    node.child_total_values = np.array(total_values, dtype=np.float64)
+    return node
+
+
+def _reference_puct_slot(node: MCTSNode[NimPosition, NimPly], exploration_constant: float = 1.41) -> int:
+    """Scalar reference for the winning slot, mirroring child_puct_values slot by slot."""
+    best_slot = 0
+    best_score = float("-inf")
+    for slot in range(node.child_count):
+        visits = int(node.child_visits[slot])
+        average_value = 0.0 if visits == 0 else float(node.child_total_values[slot]) / visits
+        exploitation = -average_value
+        exploration = (
+            exploration_constant * float(node.child_priors[slot]) * math.sqrt(node.visits) / (1 + visits)
+        )
+        score = exploitation + exploration
+        if score > best_score:
+            best_score = score
+            best_slot = slot
+    return best_slot
+
+
+def test_vectorised_puct_selection_agrees_with_a_scalar_reference() -> None:
+    # Drives both the vectorised child_puct_values and an independently written
+    # scalar loop over the same statistics, and requires they pick the same slot.
+    # Covers the cases the plan calls out by name plus a randomised sweep, since
+    # the vectorised zero-visit guard (np.divide's out/where) is exactly the kind
+    # of thing that can quietly diverge from the scalar version it replaces.
+    cases = [
+        # every slot unvisited: exploitation is 0 everywhere, priors alone decide.
+        _node_with_child_stats(parent_visits=5, priors=[0.5, 0.2, 0.3], visits=[0, 0, 0], total_values=[0.0, 0.0, 0.0]),
+        # exactly one visited slot.
+        _node_with_child_stats(
+            parent_visits=8, priors=[0.4, 0.4, 0.2], visits=[0, 4, 0], total_values=[0.0, 1.5, 0.0]
+        ),
+        # an exact tie across every slot: first index must win, not a random one.
+        _node_with_child_stats(
+            parent_visits=3, priors=[0.25] * 4, visits=[0] * 4, total_values=[0.0] * 4
+        ),
+    ]
+
+    rng = random.Random(20260803)
+    for _ in range(200):
+        slot_count = rng.randint(1, 6)
+        visits = [rng.randint(0, 20) for _ in range(slot_count)]
+        cases.append(
+            _node_with_child_stats(
+                parent_visits=rng.randint(0, 50),
+                priors=[rng.random() for _ in range(slot_count)],
+                visits=visits,
+                total_values=[rng.uniform(-v, v) if v else 0.0 for v in visits],
+            )
+        )
+
+    for case in cases:
+        assert int(np.argmax(case.child_puct_values())) == _reference_puct_slot(case)
 
 
 def test_evaluator_is_called_exactly_once_per_iteration() -> None:

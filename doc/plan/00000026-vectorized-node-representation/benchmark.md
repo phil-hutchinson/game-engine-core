@@ -89,3 +89,72 @@ into the arrays is not a material cost.
 One number worth carrying into Step 3: `visits` was called 98,424 times in that
 profile, once per slot scored, to recompute a parent visit count that is constant
 across the whole loop. Vectorising hoists it out by construction.
+
+## Step 3 — vectorised PUCT selection
+
+**Taken on a different machine from Steps 1–2.** None of the numbers below are
+comparable to the ones above — only ratios within this section are meaningful.
+Since the switch happened mid-story, Step 2 was re-run here first to give this
+machine its own baseline; that re-run is what Step 3 is measured against, not
+the Step 1/2 figures above.
+
+### Machine
+
+| | |
+|---|---|
+| CPU | AMD Ryzen 7 8700F, 8 cores / 16 threads |
+| Memory | 8 GB |
+| Platform | Linux 6.18.33.2-microsoft-standard-WSL2 (devcontainer on WSL2) |
+| Python | 3.12.13 (GCC 12.2.0) |
+| numpy | 2.5.1 |
+
+### Step 2 baseline, re-measured on this machine
+
+`iterations=800 seed=20260730`
+
+| cell | fleet | repeats | wall (s) | median | spread | iters/s | signature |
+|---|---:|---:|---:|---:|---:|---:|---|
+| narrow (nim) | 1 | 15 | 0.0213 | 0.0219 | 12.1% | 37,634 | `dc8e8031` |
+| narrow (nim) | 64 | 3 | 1.6547 | 1.6968 | 4.9% | 30,942 | `efd7b510` |
+| wide (tictactoe) | 1 | 15 | 0.0327 | 0.0345 | 18.0% | 24,487 | `509ce670` |
+| wide (tictactoe) | 64 | 3 | 2.6056 | 2.7428 | 6.1% | 19,650 | `8f8f1ab7` |
+
+Reproducibility check: a second run agreed to within 3.1%, 2.7%, 3.0%, and 3.7%
+on `iters/s` respectively, and matched all four signatures.
+
+### Step 3
+
+| cell | fleet | wall (s) | iters/s | vs baseline (this machine) | signature |
+|---|---:|---:|---:|---:|---|
+| narrow (nim) | 1 | 0.0585 | 13,672 | −64% | `dc8e8031` |
+| narrow (nim) | 64 | 4.2962 | 11,917 | −61% | `efd7b510` |
+| wide (tictactoe) | 1 | 0.0405 | 19,757 | −19% | `509ce670` |
+| wide (tictactoe) | 64 | 3.1731 | 16,136 | −18% | `8f8f1ab7` |
+
+Reproducibility check: a second run agreed to within 0.0%, 0.3%, 1.0%, and 4.0%
+on `iters/s` respectively (the wide/fleet-64 cell ran noisier, 15% spread on
+that repeat set, but the headline minimum still held). **All four signatures
+are unchanged from the Step 2 baseline above and from the Steps 1–2 figures
+taken on the old machine** — search results did not move.
+
+### This does not match the plan's expectation
+
+The plan's Step 3 section expected the wide cell to improve and left the narrow
+cell's regression as the open small-array risk. What was measured instead is a
+regression in **all four cells**, wide included — steeper on narrow (−61/−64%)
+but still substantial on wide (−18/−19%).
+
+A likely reason: `child_puct_values` is not one numpy call, it's about eight —
+`zeros_like`, the guarded `divide`, the negation, and each step of building the
+exploration term (`priors * constant`, `* sqrt`, `child_visits + 1`, the
+division, the final addition) is its own array op, each paying numpy's per-call
+dispatch cost. TicTacToe's branching factor (up to 9) sits well inside the
+20–50-element range the plan's own risk note names as overhead-bound, so it is
+plausible this cell was never going to clear that bar without fusing those ops
+down — this measurement doesn't distinguish "vectorising per-node selection
+doesn't pay off at these branching factors" from "this particular
+implementation makes more numpy calls than it needs to."
+
+Left for Step 6, per the plan: whether to accept this, add a slot-count
+threshold, reduce the op count and re-measure, or reconsider per-node
+vectorisation versus fleet-axis vectorisation. Not acted on here.
