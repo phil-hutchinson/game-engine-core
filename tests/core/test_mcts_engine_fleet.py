@@ -242,12 +242,14 @@ def test_expansion_never_calls_apply_plies() -> None:
     assert recorder.legal_plies_widths[0] == 3
 
 
-def test_lazy_materialisation_builds_one_successor_per_tree_per_iteration() -> None:
-    # #26 Step 4: a slot's successor is built the first time descent picks it, at
-    # width one, per tree — not batched across the fleet. That batching is Step
-    # 5's job; until then a second iteration over three deep piles (root already
-    # expanded by the first) makes three separate width-one apply_plies calls,
-    # one per tree's descent into its best slot.
+def test_lazy_materialisation_builds_one_successor_per_tree_in_one_batched_call() -> None:
+    # #26 Step 5: a slot's successor is still built the first time descent picks
+    # it, but every tree's pending materialisation for the wave is resolved by
+    # one batched apply_plies call rather than one call per tree. The first
+    # iteration only expands the three roots (each is its own first leaf, so
+    # nothing is pending yet); the second iteration has all three trees descend
+    # into their best slot and go pending together, producing exactly one call
+    # of width 3 — not three calls of width 1.
     recorder = _WidthRecordingBatchProcessor()
     engine = MCTSEngine(
         evaluator=_WidthRecordingEvaluator(), iterations=2, batch_ops=recorder
@@ -255,7 +257,57 @@ def test_lazy_materialisation_builds_one_successor_per_tree_per_iteration() -> N
 
     engine.select_plies_for_training([NimPosition(pile=DEEP_PILE)] * 3)
 
-    assert recorder.apply_plies_widths == [1, 1, 1]
+    assert recorder.apply_plies_widths == [3]
+
+
+def test_one_wave_issues_at_most_one_apply_plies_call_bounded_by_fleet_size() -> None:
+    # #26 Step 5: descent defers materialisation until the whole fleet has
+    # descended, so a wave's pending slots are resolved by a single apply_plies
+    # call rather than one per tree — and that call's width is bounded by how
+    # many trees went pending, never by branching factor. Four deep piles branch
+    # at 2: the first iteration only expands the roots (nothing pending yet, so
+    # apply_plies is not called at all that wave), and the second has all four
+    # trees pick their best, unmaterialised slot and go pending together.
+    fleet_size = 4
+    recorder = _WidthRecordingBatchProcessor()
+    engine = MCTSEngine(
+        evaluator=_WidthRecordingEvaluator(), iterations=2, batch_ops=recorder
+    )
+
+    engine.select_plies_for_training([NimPosition(pile=DEEP_PILE)] * fleet_size)
+
+    # Two waves ran; at most one of them had anything pending, so at most one
+    # apply_plies call exists in total, and its width cannot exceed the fleet.
+    assert len(recorder.apply_plies_widths) <= 1
+    assert all(width <= fleet_size for width in recorder.apply_plies_widths)
+    # This particular wave did have every tree go pending together.
+    assert recorder.apply_plies_widths == [fleet_size]
+
+
+def test_a_wave_that_only_revisits_materialised_slots_issues_no_apply_plies_call() -> None:
+    # #26 Step 5: once a slot's successor is materialised, a later wave that
+    # descends straight into it again has nothing pending — the descent stops
+    # at an already-materialised leaf and never reaches the "unmaterialised
+    # slot" branch. Two piles of 1 under the single-take fixture (takes=(1,))
+    # both terminate after one ply: iteration 1 expands the bare roots
+    # (nothing pending), iteration 2 materialises both single children — which
+    # land on pile 0, terminal — in one batched call, and iteration 3
+    # re-descends straight into those already-materialised terminal leaves,
+    # contributing no apply_plies call at all.
+    recorder = _WidthRecordingBatchProcessor()
+    engine = MCTSEngine(
+        evaluator=_WidthRecordingEvaluator(), iterations=3, batch_ops=recorder
+    )
+    roots = engine._create_roots(  # pyright: ignore[reportPrivateUsage]
+        [NimPosition(pile=1, takes=(1,)), NimPosition(pile=1, takes=(1,))]
+    )
+
+    engine._grow_trees(roots)  # pyright: ignore[reportPrivateUsage]
+
+    # Only iteration 2 had anything pending (both trees' single slot); the list
+    # has exactly one entry even though three waves ran, so iteration 3 is the
+    # zero-apply_plies wave this test is pinning.
+    assert recorder.apply_plies_widths == [2]
 
 
 def test_the_zero_visit_fallback_still_asks_for_legality_one_slot_at_a_time() -> None:

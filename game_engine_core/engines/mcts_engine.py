@@ -397,21 +397,38 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
         terminal one — which never gains slots and so is reached as a leaf on
         every iteration it wins.
 
-        Descent also materialises. An expanded node's slots exist as priors and
-        statistics before any child object does; the first descent to pick a
-        given slot builds that slot's successor position and node on the spot,
-        then stops there — it is this iteration's leaf. A slot PUCT never picks
-        stays unmaterialised indefinitely, which is what keeps expansion cheap:
-        the fleet builds one successor per tree per iteration rather than one
-        per legal ply.
+        Descent also materialises, but the materialisation itself is deferred
+        rather than performed inline. An expanded node's slots exist as priors
+        and statistics before any child object does; the first descent to pick
+        a given slot stops there and records (parent, slot, root_index) as
+        pending, instead of building the successor position on the spot. A slot
+        PUCT never picks stays unmaterialised indefinitely, which is what keeps
+        expansion cheap: the fleet builds at most one successor per tree per
+        iteration rather than one per legal ply.
+
+        Materialisation is always the last act of a descent — a freshly
+        materialised node has no children of its own to keep descending into —
+        so once every tree has either reached a leaf or gone pending, the
+        fleet's pending slots are exactly this wave's remaining leaves. That is
+        what lets the whole wave's materialisation happen as a single batched
+        ``apply_plies`` call below, at a width bounded by how many trees went
+        pending (never by branching factor): no interleaving by depth is
+        needed, since a tree never has more than one pending slot per wave.
 
         The slot ordering is load-bearing. Everything downstream pairs these leaves
         with their outcomes, evaluations and values by index, so a result that did
         not come back in root order would be backpropagated into the wrong tree.
+        Each pending leaf is scattered back into its own root's position once
+        materialised, so the returned order matches ``roots`` regardless of which
+        trees went pending.
         """
         leaves: list[MCTSNode[TPosition, TPly]] = []
+        # (parent, slot, root_index): root_index is where this pending
+        # materialisation's eventual node belongs in `leaves`, once the batch
+        # call below resolves it into a real node.
+        pending: list[tuple[MCTSNode[TPosition, TPly], int, int]] = []
 
-        for root in roots:
+        for root_index, root in enumerate(roots):
             current = root
 
             while current.child_count:
@@ -423,21 +440,37 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
                 else:
                     # best_slot is unvisited: no entry in children means no node has
                     # been materialised for it yet, even though its priors and
-                    # statistics already exist in current's arrays. Materialise it
-                    # now, at width one, and stop descending — the new node is this
-                    # tree's leaf. slot=best_slot is required, not optional: it is
-                    # how this node's statistics resolve through its parent's arrays
-                    # (see visits/total_value/record_visit), and backpropagation
-                    # starts from this exact node.
-                    best_ply = current.child_plies[best_slot]
-                    new_position = self._batch_ops.apply_plies([current.position], [best_ply])[0]
-                    new_node = MCTSNode(
-                        position=new_position, parent=current, ply_from_parent=best_ply, slot=best_slot
-                    )
-                    current.children[best_slot] = new_node
-                    current = new_node
+                    # statistics already exist in current's arrays. Defer rather
+                    # than materialise here: record it as pending and stop
+                    # descending. `current` (the parent) is only a placeholder in
+                    # `leaves` until the batch below replaces it with this tree's
+                    # real leaf.
+                    pending.append((current, best_slot, root_index))
+                    break  # Stop descending; can't proceed without materializing the child first.
 
             leaves.append(current)
+
+        # One batched call for the whole wave, not one per tree: every pending
+        # slot's parent position and chosen ply are gathered first, so the
+        # width is the number of trees that went pending this wave.
+        if pending:
+            positions = [parent.position for parent, _, _ in pending]
+            plies = [parent.child_plies[slot] for parent, slot, _ in pending]
+            successors = self._batch_ops.apply_plies(positions, plies)
+
+            for (parent, slot, root_index), successor_position in zip(pending, successors, strict=True):
+                # slot=slot is required, not optional: it is how this node's
+                # statistics resolve through its parent's arrays (see
+                # visits/total_value/record_visit), and backpropagation starts
+                # from this exact node.
+                new_node = MCTSNode(
+                    position=successor_position,
+                    parent=parent,
+                    ply_from_parent=parent.child_plies[slot],
+                    slot=slot,
+                )
+                parent.children[slot] = new_node
+                leaves[root_index] = new_node
 
         return leaves
 
@@ -452,9 +485,10 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
         expanded the moment it has a priors array; whether any of its slots also
         has a materialised child object is a separate, later fact, decided by
         descent rather than by expansion. ``apply_plies`` is not called by this
-        method at all: ``_select_leaves`` (and ``observe_ply``, for re-rooting)
-        materialise a slot's successor lazily, at width one, only if and when a
-        descent actually selects it.
+        method at all: ``_select_leaves`` defers materialisation for every slot
+        a descent actually selects until the whole fleet has descended, then
+        resolves them all in one batched call (``observe_ply``, for re-rooting,
+        still materialises a single slot on demand, at width one).
 
         Pairs ``leaves`` with ``evaluations`` by index. Both arrive already narrowed to
         the non-terminal leaves of one iteration, so this method works entirely in that
