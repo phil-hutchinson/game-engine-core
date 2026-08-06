@@ -58,7 +58,7 @@ class MCTSNode[TPosition: GamePosition[Any], TPly: GamePly]:
     child_priors: NDArray[np.float64] = field(default_factory=lambda: _NO_PRIORS)
     child_visits: NDArray[np.int64] = field(default_factory=lambda: _NO_VISITS)
     child_total_values: NDArray[np.float64] = field(default_factory=lambda: _NO_VALUES)
-    children: list[MCTSNode[TPosition, TPly]] = field(default_factory=lambda: [])
+    children: dict[int, MCTSNode[TPosition, TPly]] = field(default_factory=lambda: {})
 
     # A root's own statistics, read only while ``parent`` is None. Everything
     # else reads its counterparts out of its parent's arrays.
@@ -147,13 +147,6 @@ class MCTSNode[TPosition: GamePosition[Any], TPly: GamePly]:
         self.child_visits = np.zeros(len(plies), dtype=np.int64)
         self.child_total_values = np.zeros(len(plies), dtype=np.float64)
 
-    def attach_children(self, positions: Sequence[TPosition]) -> None:
-        """Materialise a child node per slot, from the successor positions in slot order."""
-        self.children = [
-            MCTSNode(position=position, parent=self, ply_from_parent=ply, slot=slot)
-            for slot, (position, ply) in enumerate(zip(positions, self.child_plies, strict=True))
-        ]
-
     def detach_as_root(self) -> None:
         """Promote this node to a root, bringing its statistics with it.
 
@@ -223,9 +216,23 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
             self._root_node = None
             return
 
-        new_root = self._root_node.children[new_slot]
-        new_root.detach_as_root()
-        self._root_node = new_root
+        if new_slot in self._root_node.children:
+            new_root = self._root_node.children[new_slot]
+            new_root.detach_as_root()
+            self._root_node = new_root
+        else:
+            # A legal ply the search never descended into: it has a slot (and
+            # thus a prior and statistics) but no materialised child. Materialise
+            # it now using the position the caller has already computed, rather
+            # than discarding the tree.
+            old_root = self._root_node
+            ply_from_old_root = self._root_node.child_plies[new_slot]
+            new_root: MCTSNode[TPosition, TPly] = MCTSNode(
+                position=new_position, parent=old_root, ply_from_parent=ply_from_old_root, slot=new_slot
+            )
+            old_root.children[new_slot] = new_root
+            new_root.detach_as_root()
+            self._root_node = new_root
 
     def reset(self) -> None:
         """A new game has started, clear state"""
@@ -390,6 +397,14 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
         terminal one — which never gains slots and so is reached as a leaf on
         every iteration it wins.
 
+        Descent also materialises. An expanded node's slots exist as priors and
+        statistics before any child object does; the first descent to pick a
+        given slot builds that slot's successor position and node on the spot,
+        then stops there — it is this iteration's leaf. A slot PUCT never picks
+        stays unmaterialised indefinitely, which is what keeps expansion cheap:
+        the fleet builds one successor per tree per iteration rather than one
+        per legal ply.
+
         The slot ordering is load-bearing. Everything downstream pairs these leaves
         with their outcomes, evaluations and values by index, so a result that did
         not come back in root order would be backpropagated into the wrong tree.
@@ -403,7 +418,24 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
                 # argmax returns the first maximal index, so an exact tie keeps the
                 # earliest legal ply rather than breaking randomly.
                 best_slot = int(np.argmax(current.child_puct_values()))
-                current = current.children[best_slot]
+                if best_slot in current.children:
+                    current = current.children[best_slot]
+                else:
+                    # best_slot is unvisited: no entry in children means no node has
+                    # been materialised for it yet, even though its priors and
+                    # statistics already exist in current's arrays. Materialise it
+                    # now, at width one, and stop descending — the new node is this
+                    # tree's leaf. slot=best_slot is required, not optional: it is
+                    # how this node's statistics resolve through its parent's arrays
+                    # (see visits/total_value/record_visit), and backpropagation
+                    # starts from this exact node.
+                    best_ply = current.child_plies[best_slot]
+                    new_position = self._batch_ops.apply_plies([current.position], [best_ply])[0]
+                    new_node = MCTSNode(
+                        position=new_position, parent=current, ply_from_parent=best_ply, slot=best_slot
+                    )
+                    current.children[best_slot] = new_node
+                    current = new_node
 
             leaves.append(current)
 
@@ -415,6 +447,14 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
         evaluations: Sequence[PositionEvaluation],
     ) -> None:
         """Give every leaf a slot per legal ply, priced by its evaluation's policy.
+
+        This is priors only — no successor position is built here. A leaf becomes
+        expanded the moment it has a priors array; whether any of its slots also
+        has a materialised child object is a separate, later fact, decided by
+        descent rather than by expansion. ``apply_plies`` is not called by this
+        method at all: ``_select_leaves`` (and ``observe_ply``, for re-rooting)
+        materialise a slot's successor lazily, at width one, only if and when a
+        descent actually selects it.
 
         Pairs ``leaves`` with ``evaluations`` by index. Both arrive already narrowed to
         the non-terminal leaves of one iteration, so this method works entirely in that
@@ -438,50 +478,31 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
             [leaf.position for leaf in leaves]
         )
 
-        # Flatten the fleet's expansions into one batch: every expanding leaf's
-        # position repeated against each of its legal plies. Resolving all priors
-        # first is what makes expansion all-or-nothing across the batch — a missing
-        # policy entry raises before a single successor exists.
-        flat_positions: list[TPosition] = []
-        flat_plies: list[TPly] = []
-        flat_priors: list[float] = []
-        for index, (leaf, evaluation, legal_plies) in enumerate(
-            zip(leaves, evaluations, batch_legal_plies, strict=True)
-        ):
+        # Resolving every leaf's priors before expanding any of them is what makes
+        # expansion all-or-nothing across the batch — a missing policy entry raises
+        # before a single leaf is marked expanded. Nothing here touches successor
+        # positions; a slot is priors and statistics only until descent visits it.
+
+        nodes_to_process = list(zip(leaves, evaluations, batch_legal_plies, strict=True))
+        for index, (leaf, evaluation, legal_plies) in enumerate(nodes_to_process):
             for legal_ply in legal_plies:
                 ply_key = str(legal_ply)
-                try:
-                    flat_priors.append(evaluation.policy[ply_key])
-                except KeyError:
+                if ply_key not in evaluation.policy:
                     # index is into this batch, not into the fleet — this method has no
                     # slot indices — but it is enough to identify the offending
                     # evaluation among N, which the ply key alone is not.
                     raise ValueError(
                         f"Policy missing entry for ply '{ply_key}' "
                         f"(batch leaf {index}, position {leaf.position})"
-                    ) from None
-                flat_positions.append(leaf.position)
-                flat_plies.append(legal_ply)
+                    )
 
-        # One call spanning every expanding leaf in the fleet, index-paired rather
-        # than a cross product. A leaf's own children were already a batch before the
-        # fleet existed; the fleet collapses those batches into this single call.
-        #
-        # This is the one seam call whose width is not bounded by the fleet size: it is
-        # N x branching factor, where everything else on the fleet path is at most N.
-        # That is a property of eager full expansion and is transitional — #26
-        # materialises children lazily, which drops this call from expansion entirely
-        # and rebuilds successors during descent at one per tree per iteration.
-        successors = self._batch_ops.apply_plies(flat_positions, flat_plies)
-
-        # Walk the flat results back out to their leaves. offset is the lane map at
-        # this level, the way pending is one frame up.
-        offset = 0
-        for leaf, legal_plies in zip(leaves, batch_legal_plies, strict=True):
-            end = offset + len(legal_plies)
-            leaf.expand(list(legal_plies), flat_priors[offset:end])
-            leaf.attach_children(successors[offset:end])
-            offset = end
+        # Every policy entry is known to be present at this point, so this pass
+        # only reads priors into each leaf's slots — no child objects are created.
+        for leaf, evaluation, legal_plies in nodes_to_process:
+            priors: list[float] = []
+            for legal_ply in legal_plies:
+                priors.append(evaluation.policy[str(legal_ply)])
+            leaf.expand(list(legal_plies), priors)
 
     def _backpropagate(self, node: MCTSNode[TPosition, TPly], value: float) -> None:
         """Update statistics for this node and all ancestors."""

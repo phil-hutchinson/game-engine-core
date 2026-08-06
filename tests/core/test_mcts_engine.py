@@ -14,6 +14,7 @@ import pytest
 
 from game_engine_core.engines.mcts_engine import MCTSEngine, MCTSNode
 from game_engine_core.evaluators.null_evaluator import NullEvaluator
+from game_engine_core.game.batch_position_processor import BatchPositionProcessor
 from game_engine_core.models.position_evaluation import PositionEvaluation
 
 from .nim_fixture import NimPly, NimPosition
@@ -34,6 +35,24 @@ def _slot_of(root: MCTSNode[NimPosition, NimPly], ply: str) -> int:
     ply's statistics looks its slot up here and indexes the parent's arrays.
     """
     return next(slot for slot, slot_ply in enumerate(root.child_plies) if str(slot_ply) == ply)
+
+
+def _attach_child(
+    parent: MCTSNode[NimPosition, NimPly], slot: int, position: NimPosition
+) -> MCTSNode[NimPosition, NimPly]:
+    """Materialise a child at a given slot by hand, the way lazy descent would leave it.
+
+    Children are no longer built eagerly and in bulk (that was ``attach_children``,
+    which Step 4 removed along with the eager expansion it served): a test that
+    wants an actual child object to inspect or recurse into materialises the one
+    slot it cares about, with ``slot`` set so the child reads its statistics
+    through the parent's arrays exactly as descent-time materialisation would.
+    """
+    child: MCTSNode[NimPosition, NimPly] = MCTSNode(
+        position=position, parent=parent, ply_from_parent=parent.child_plies[slot], slot=slot
+    )
+    parent.children[slot] = child
+    return child
 
 
 def test_forced_win_in_one_is_found() -> None:
@@ -107,7 +126,7 @@ def test_visit_distribution_uniform_fallback_without_visits() -> None:
 def test_backpropagation_alternates_value_sign_per_level() -> None:
     # Drives the private _backpropagate directly: the per-level sign flip is the
     # convention under test and is not observable through the public API.
-    # Built through expand/attach_children rather than by hand, so each node ends
+    # Built through expand/_attach_child rather than by hand, so each node ends
     # up addressing its statistics through its parent's arrays the way the search
     # would leave it — which is the storage the sign flip has to land in.
     engine = _engine(iterations=0)
@@ -115,11 +134,9 @@ def test_backpropagation_alternates_value_sign_per_level() -> None:
         position=NimPosition(pile=3), parent=None, ply_from_parent=None
     )
     root.expand([NimPly(1)], [1.0])
-    root.attach_children([NimPosition(pile=2)])
-    mid = root.children[0]
+    mid = _attach_child(root, 0, NimPosition(pile=2))
     mid.expand([NimPly(1)], [1.0])
-    mid.attach_children([NimPosition(pile=1)])
-    leaf = mid.children[0]
+    leaf = _attach_child(mid, 0, NimPosition(pile=1))
 
     engine._backpropagate(leaf, 1.0)  # pyright: ignore[reportPrivateUsage]
 
@@ -151,10 +168,11 @@ def _policy_engine(
     return MCTSEngine(evaluator=evaluator, iterations=iterations), evaluator
 
 
-def test_first_iteration_evaluates_the_root_and_attaches_every_child() -> None:
-    # The root is simply the first leaf, so one iteration is enough to expand it
-    # fully — and its children carry real priors from the evaluator rather than
-    # the uniform default the old expand-a-child flow left them with.
+def test_first_iteration_expands_the_root_with_priors_but_no_materialised_children() -> None:
+    # #26 Step 4 (a): the root is simply the first leaf, so one iteration is enough
+    # to expand it fully — every legal ply gets a slot and a real prior from the
+    # evaluator — but expansion is priors only. No descent has happened yet to
+    # materialise a child object into any of those slots.
     engine, evaluator = _policy_engine({"1": 0.25, "2": 0.75}, iterations=1)
     root = engine._create_root(NimPosition(pile=5))  # pyright: ignore[reportPrivateUsage]
     engine._grow_trees([root])  # pyright: ignore[reportPrivateUsage]
@@ -169,6 +187,8 @@ def test_first_iteration_evaluates_the_root_and_attaches_every_child() -> None:
     assert priors == {"1": 0.25, "2": 0.75}
     # Expansion alone confers no visits: the value backpropagated is the root's.
     assert [int(visits) for visits in root.child_visits] == [0, 0]
+    # The point of lazy materialisation: expanded does not mean materialised.
+    assert root.children == {}
 
 
 def test_zero_visit_root_children_are_ranked_by_prior() -> None:
@@ -198,6 +218,40 @@ def test_a_dominant_prior_is_reselected_while_its_sibling_stays_unvisited() -> N
         str(ply): int(count) for ply, count in zip(root.child_plies, root.child_visits, strict=True)
     }
     assert visits == {"1": 4, "2": 0}
+
+
+class _PlyRecordingBatchProcessor(BatchPositionProcessor[NimPly, NimPosition]):
+    """Records every ply passed to apply_plies, across every call, in call order."""
+
+    def __init__(self) -> None:
+        self.applied_plies: list[NimPly] = []
+
+    def apply_plies(
+        self, positions: Sequence[NimPosition], plies: Sequence[NimPly]
+    ) -> Sequence[NimPosition]:
+        self.applied_plies.extend(plies)
+        return super().apply_plies(positions, plies)
+
+
+def test_a_slot_puct_never_selects_never_gets_a_materialised_successor() -> None:
+    # #26 Step 4 (b): same dominant-prior scenario as above, but watching
+    # apply_plies directly rather than inferring the absence of a successor from
+    # a 0 visit count. The 0.01-prior sibling ("2") must never appear among the
+    # plies lazy materialisation applied — it is never selected, so a successor
+    # position for it is never built.
+    recorder = _PlyRecordingBatchProcessor()
+    evaluator = _FixedPolicyEvaluator({"1": 0.99, "2": 0.01})
+    engine = MCTSEngine(evaluator=evaluator, iterations=5, batch_ops=recorder)
+    root = engine._create_root(NimPosition(pile=20))  # pyright: ignore[reportPrivateUsage]
+
+    engine._grow_trees([root])  # pyright: ignore[reportPrivateUsage]
+
+    assert root.child_visits[_slot_of(root, "2")] == 0
+    assert all(str(ply) != "2" for ply in recorder.applied_plies)
+    # Sanity check on the recorder itself: the winning ply was materialised, so
+    # the absence above reflects PUCT's choice rather than apply_plies never
+    # firing at all.
+    assert any(str(ply) == "1" for ply in recorder.applied_plies)
 
 
 def _node_with_child_stats(
@@ -335,9 +389,8 @@ def test_temperature_zero_picks_most_visited_ply() -> None:
         position=NimPosition(pile=5), parent=None, ply_from_parent=None
     )
     root.expand([NimPly(1), NimPly(2)], [0.5, 0.5])
-    root.attach_children(
-        [NimPosition(pile=4, active_player_id=-1), NimPosition(pile=3, active_player_id=-1)]
-    )
+    # No child objects needed: _choose_plies reads visits and priors straight off
+    # the parent's arrays and never touches root.children.
     root.child_visits[:] = [5, 10]
 
     assert engine._choose_plies([root])[0].take == 2  # pyright: ignore[reportPrivateUsage]
@@ -374,6 +427,32 @@ def test_observe_ply_rerroots_onto_matching_child_preserving_subtree() -> None:
     # into the node's own root scalars.
     assert new_root.visits == expected_visits
     assert new_root.child_plies is expected_child_plies
+
+
+def test_observe_ply_onto_a_legal_unvisited_ply_materialises_rather_than_discarding() -> None:
+    # #26 Step 4 (c): a budget of 1 expands the root — every legal ply gets a slot
+    # — but never descends past it, so neither child is materialised. observe_ply
+    # onto either one is a legal ply the tree does have a slot for, just no child
+    # object, and must build that successor on demand rather than falling into
+    # the discard path reserved for a ply the tree never saw at all.
+    engine, _ = _policy_engine({"1": 0.25, "2": 0.75}, iterations=1)
+    position = NimPosition(pile=5)
+    engine.select_ply(position)
+    root = engine._root_node  # pyright: ignore[reportPrivateUsage]
+    assert root is not None
+    assert root.children == {}  # confirms both slots really are unmaterialised
+    unvisited_ply = next(ply for ply in root.child_plies if str(ply) == "1")
+    assert root.child_visits[_slot_of(root, "1")] == 0
+
+    new_position = position.apply_ply(unvisited_ply)
+    engine.observe_ply(position, unvisited_ply, new_position)
+
+    new_root = engine._root_node  # pyright: ignore[reportPrivateUsage]
+    assert new_root is not None  # the discard path leaves this None
+    assert new_root.position.pile == new_position.pile
+    assert new_root.parent is None
+    assert new_root.slot is None
+    assert new_root is root.children[_slot_of(root, "1")]
 
 
 def test_observe_ply_miss_clears_root_and_rebuilds() -> None:

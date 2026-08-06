@@ -223,12 +223,11 @@ def test_width_one_training_search_agrees_with_the_play_path() -> None:
     assert played.take == trained.take
 
 
-def test_expansion_builds_every_successor_in_the_fleet_in_one_call() -> None:
-    # One iteration over three deep piles expands all three roots, and each has two
-    # legal plies — six successors in total. They must arrive as a single width-6
-    # call, not six calls of width one and not three calls of width two: a leaf's own
-    # children were already a batch before the fleet existed, and the fleet collapses
-    # those batches together.
+def test_expansion_never_calls_apply_plies() -> None:
+    # #26 Step 4: expansion gives every leaf priors, nothing more — successor
+    # positions are no longer built for every legal ply up front. One iteration
+    # over three deep piles does nothing but expand the three roots (each is its
+    # own first leaf), so apply_plies must not be called at all.
     recorder = _WidthRecordingBatchProcessor()
     engine = MCTSEngine(
         evaluator=_WidthRecordingEvaluator(), iterations=1, batch_ops=recorder
@@ -236,11 +235,27 @@ def test_expansion_builds_every_successor_in_the_fleet_in_one_call() -> None:
 
     engine.select_plies_for_training([NimPosition(pile=DEEP_PILE)] * 3)
 
-    assert recorder.apply_plies_widths == [6]
+    assert recorder.apply_plies_widths == []
     # Expansion asks for legality once for the whole fleet too, which #22 already
     # batched. Only the first entry belongs to expansion; later ones come from
     # choosing a ply once the search is over.
     assert recorder.legal_plies_widths[0] == 3
+
+
+def test_lazy_materialisation_builds_one_successor_per_tree_per_iteration() -> None:
+    # #26 Step 4: a slot's successor is built the first time descent picks it, at
+    # width one, per tree — not batched across the fleet. That batching is Step
+    # 5's job; until then a second iteration over three deep piles (root already
+    # expanded by the first) makes three separate width-one apply_plies calls,
+    # one per tree's descent into its best slot.
+    recorder = _WidthRecordingBatchProcessor()
+    engine = MCTSEngine(
+        evaluator=_WidthRecordingEvaluator(), iterations=2, batch_ops=recorder
+    )
+
+    engine.select_plies_for_training([NimPosition(pile=DEEP_PILE)] * 3)
+
+    assert recorder.apply_plies_widths == [1, 1, 1]
 
 
 def test_the_zero_visit_fallback_still_asks_for_legality_one_slot_at_a_time() -> None:
