@@ -7,7 +7,7 @@ things only a fleet can get wrong. Two themes:
   make exactly one evaluator call, of width N — that is the whole point of the
   plural form. Terminal leaves are scored from their outcome and drop out of the
   batch, narrowing it without costing their game its iteration.
-- **Lanes.** Game identity is the slot index. A result that came back in the wrong
+- **Lanes.** Game identity is the fleet position. A result that came back in the wrong
   order would be a silent, plausible-looking wrong answer, so alignment is tested
   against positions whose correct answers cannot be confused.
 
@@ -89,7 +89,7 @@ def _fleet_engine(
 def test_each_iteration_makes_one_evaluator_call_spanning_the_whole_fleet() -> None:
     # The story's central claim: N games' evaluations are collected into one forward
     # pass per iteration instead of N calls of width one. Three deep piles keep every
-    # selected leaf non-terminal, so no slot ever drops out of the batch.
+    # selected leaf non-terminal, so no game ever drops out of the batch.
     engine, evaluator = _fleet_engine(iterations=5)
 
     engine.select_plies_for_training([NimPosition(pile=DEEP_PILE)] * 3)
@@ -106,10 +106,10 @@ def test_a_single_game_is_the_fleet_at_width_one() -> None:
 
 
 def test_results_are_aligned_with_the_positions_they_came_from() -> None:
-    # Each slot's policy must cover its own position's legal plies. Pile 1 has a
+    # Each game's policy must cover its own position's legal plies. Pile 1 has a
     # single legal ply and pile 5 has two, so a swapped result is not merely wrong
-    # but impossible — the pile-1 slot cannot legitimately offer a take of 2.
-    # The forced slot goes first deliberately: a fleet whose key-set signature reads
+    # but impossible — the pile-1 game cannot legitimately offer a take of 2.
+    # The forced game goes first deliberately: a fleet whose key-set signature reads
     # the same backwards would pass under a reversed result order.
     engine, _ = _fleet_engine(iterations=20)
 
@@ -118,11 +118,11 @@ def test_results_are_aligned_with_the_positions_they_came_from() -> None:
     )
 
     assert [set(policy) for _, policy in results] == [{"1"}, {"1", "2"}, {"1", "2"}]
-    # The forced slot's ply is the one ply it has, whatever the search did elsewhere.
+    # The forced game's ply is the one ply it has, whatever the search did elsewhere.
     assert results[0][0].take == 1
 
 
-def test_slot_order_follows_the_input_order_not_the_position_contents() -> None:
+def test_fleet_order_follows_the_input_order_not_the_position_contents() -> None:
     # The same two positions in both orders: the results must swap with them. Guards
     # against an implementation that happens to be right for one ordering — e.g. one
     # that sorted or grouped the batch and never mapped it back.
@@ -139,7 +139,7 @@ def test_terminal_leaves_leave_the_batch_without_costing_their_game_an_iteration
     # Pile 1: iteration 1 evaluates and expands the root, whose only child is the
     # empty pile — terminal. Every later iteration selects that child, reads its
     # outcome and skips the evaluator, so the batch narrows from 2 to 1 while the
-    # deep slot keeps evaluating.
+    # deep game keeps evaluating.
     engine, evaluator = _fleet_engine(iterations=3)
     roots = engine._create_roots(  # pyright: ignore[reportPrivateUsage]
         [NimPosition(pile=1), NimPosition(pile=DEEP_PILE)]
@@ -154,7 +154,7 @@ def test_terminal_leaves_leave_the_batch_without_costing_their_game_an_iteration
 
 
 def test_an_all_terminal_iteration_never_reaches_the_evaluator() -> None:
-    # Both slots are pile 1, so after the first iteration expands both roots every
+    # Both games are pile 1, so after the first iteration expands both roots every
     # subsequent iteration selects a terminal leaf in every tree and the non-terminal
     # partition is empty. Routine late in a game, and the evaluator must not be
     # handed an empty batch.
@@ -169,8 +169,8 @@ def test_an_all_terminal_iteration_never_reaches_the_evaluator() -> None:
     assert [root.visits for root in roots] == [4, 4]
 
 
-def test_each_slot_gets_its_own_tree_and_its_own_iteration_budget() -> None:
-    # Equal positions in two slots are the case where a leaked or shared tree would
+def test_each_fleet_position_gets_its_own_tree_and_its_own_iteration_budget() -> None:
+    # Equal positions in two fleet positions are the case where a leaked or shared tree would
     # look most plausible: the answers would still be identical. Visit counts are
     # what give it away — each root must absorb the full budget, not a share of it.
     engine, _ = _fleet_engine(iterations=8)
@@ -310,12 +310,12 @@ def test_a_wave_that_only_revisits_materialised_slots_issues_no_apply_plies_call
     assert recorder.apply_plies_widths == [2]
 
 
-def test_the_zero_visit_fallback_still_asks_for_legality_one_slot_at_a_time() -> None:
+def test_the_zero_visit_fallback_still_asks_for_legality_one_game_at_a_time() -> None:
     """Pins the width-one residue documented on MCTSEngine._visit_distribution."""
     # Documents a known width-one residue rather than endorsing it. A budget of one
     # expands each root but never descends past it, so every child sits at 0 visits
     # and the visit distribution falls back to a uniform over legal plies — asked for
-    # per slot, since that fallback was never widened. It fires only when the budget
+    # per game, since that fallback was never widened. It fires only when the budget
     # cannot descend past a root, which is why it is tolerable; if it is ever widened,
     # this expectation becomes a single width-3 call.
     recorder = _WidthRecordingBatchProcessor()
@@ -336,10 +336,10 @@ class _PolicyMissingTakeTwoEvaluator:
 
 
 def test_an_incomplete_policy_leaves_every_leaf_in_the_batch_unexpanded() -> None:
-    # Expansion is all-or-nothing across the fleet, not just within one leaf. Slot 0
+    # Expansion is all-or-nothing across the fleet, not just within one leaf. Game 0
     # is pile 1, whose single legal ply the policy covers, so it would expand cleanly
-    # on its own; slot 1 is pile 5, where the missing take-2 entry raises. Because
-    # every prior resolves before any successor is built, the valid slot must be left
+    # on its own; game 1 is pile 5, where the missing take-2 entry raises. Because
+    # every prior resolves before any successor is built, the valid game must be left
     # unexpanded too — otherwise it would read as expanded and never be evaluated again.
     engine: MCTSEngine[NimPly, NimPosition, _PolicyMissingTakeTwoEvaluator] = MCTSEngine(
         evaluator=_PolicyMissingTakeTwoEvaluator(), iterations=5

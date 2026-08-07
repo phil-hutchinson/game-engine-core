@@ -243,7 +243,8 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
 
         Index-aligned with ``positions``: the position at index *i* is game *i*'s, and
         the result at index *i* is game *i*'s. Each game gets its own tree, addressed by
-        that slot; the trees never interact. A single game is the fleet at N = 1.
+        that fleet position; the trees never interact. A single game is the fleet at
+        N = 1.
 
         The point of the plural form is the evaluator call. All N trees advance one
         iteration together, so each iteration gathers one leaf per game into a single
@@ -258,13 +259,13 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
         until it is settled this path does not.
 
         Every position must be non-terminal and have at least one legal ply. A terminal
-        slot never gains children, so ply choice finds no plies to fall back on and
-        raises — forfeiting the completed searches of every other slot in the fleet, not
+        root never gains slots, so ply choice finds no plies to fall back on and
+        raises — forfeiting the completed searches of every other fleet position, not
         just its own. Deciding which games are in flight is the caller's job (issue #24).
 
         Each returned policy is the normalised visit count for every legal ply at that
         game's root, used as the policy training target during self-play collection.
-        Expansion attaches a child per legal ply, so plies the search never descended
+        Expansion gives every legal ply a slot, so plies the search never descended
         into are present with 0 visits and thus 0 probability.
 
         Which plies land at exactly 0 is a function of the iteration budget against the
@@ -274,7 +275,7 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
         0 here is a hard zero in a cross-entropy policy target.
 
         Returns:
-            One (selected_ply, policy) pair per input position, in slot order, where
+            One (selected_ply, policy) pair per input position, in fleet order, where
             policy maps str(ply) to probability for every legal ply in that position.
         """
         roots = self._create_roots(positions)
@@ -282,7 +283,7 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
         return list(zip(self._choose_plies(roots), self._visit_distributions(roots), strict=True))
 
     def _create_roots(self, game_positions: Sequence[TPosition]) -> Sequence[MCTSNode[TPosition, TPly]]:
-        """Create one bare root per position, in slot order."""
+        """Create one bare root per position, in fleet order."""
         return [self._create_root(game_position) for game_position in game_positions]
 
     def _create_root(self, game_position: TPosition) -> MCTSNode[TPosition, TPly]:
@@ -296,7 +297,7 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
         """Run the full iteration budget against every tree in the fleet.
 
         One pass of the loop is one iteration for every tree, so equal budgets keep
-        the games synchronised without tracking progress per slot.
+        the games synchronised without tracking progress per fleet position.
         """
         # An empty fleet is reachable — #24 shrinks the fleet as its games finish — and
         # every phase of an empty iteration is a width-zero seam call. Harmless today,
@@ -309,17 +310,17 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
             self._mcts_iteration(roots)
 
     def _choose_plies(self, roots: Sequence[MCTSNode[TPosition, TPly]]) -> Sequence[TPly]:
-        """Select one ply per root from that root's children, in slot order.
+        """Select one ply per root from that root's children, in fleet order.
 
         Which rule applies is the temperature setting's business, and it is the same
-        rule for every slot.
+        rule for every fleet position.
         """
         if self._temperature == 0.0:
             return [self._select_best_ply(root) for root in roots]
         return [self._select_best_ply_with_temperature(root, self._temperature) for root in roots]
 
     def _visit_distributions(self, roots: Sequence[MCTSNode[TPosition, TPly]]) -> Sequence[dict[str, float]]:
-        """Return one visit distribution per root, in slot order."""
+        """Return one visit distribution per root, in fleet order."""
         return [self._visit_distribution(root) for root in roots]
 
     def _visit_distribution(self, root: MCTSNode[TPosition, TPly]) -> dict[str, float]:
@@ -368,23 +369,24 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
         # Partition the leaves by outcome. Terminal leaves are scored from that
         # outcome and leave the batch; the rest are evaluated together and their
         # values scattered back, with pending as the lane map — pending[i] is the
-        # slot that evaluation i belongs to. Every slot in values is written
-        # exactly once, here or in the scatter below, so the 0.0 never survives.
+        # fleet position that evaluation i belongs to. Every fleet position in values
+        # is written exactly once, here or in the scatter below, so the 0.0 never
+        # survives.
         values: list[float] = [0.0] * len(selected_nodes)
         pending: list[int] = []
-        for slot, outcome in enumerate(outcomes):
+        for fleet_position, outcome in enumerate(outcomes):
             if outcome is None:
-                pending.append(slot)
+                pending.append(fleet_position)
             else:
-                values[slot] = float(outcome)
+                values[fleet_position] = float(outcome)
 
         # Guarded because an all-terminal iteration has nothing to evaluate — routine
         # late in a game — and there is no reason to hand the evaluator an empty batch.
         if pending:
-            leaves = [selected_nodes[slot] for slot in pending]
+            leaves = [selected_nodes[fleet_position] for fleet_position in pending]
             evaluations = self.evaluator.evaluate_positions([leaf.position for leaf in leaves])
-            for slot, evaluation in zip(pending, evaluations, strict=True):
-                values[slot] = evaluation.value
+            for fleet_position, evaluation in zip(pending, evaluations, strict=True):
+                values[fleet_position] = evaluation.value
             self._expand_leaves(leaves, evaluations)
 
         for node, value in zip(selected_nodes, values, strict=True):
@@ -400,7 +402,7 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
         Descent also materialises, but the materialisation itself is deferred
         rather than performed inline. An expanded node's slots exist as priors
         and statistics before any child object does; the first descent to pick
-        a given slot stops there and records (parent, slot, root_index) as
+        a given slot stops there and records (parent, slot, fleet_position) as
         pending, instead of building the successor position on the spot. A slot
         PUCT never picks stays unmaterialised indefinitely, which is what keeps
         expansion cheap: the fleet builds at most one successor per tree per
@@ -415,20 +417,23 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
         pending (never by branching factor): no interleaving by depth is
         needed, since a tree never has more than one pending slot per wave.
 
-        The slot ordering is load-bearing. Everything downstream pairs these leaves
+        The fleet ordering is load-bearing. Everything downstream pairs these leaves
         with their outcomes, evaluations and values by index, so a result that did
         not come back in root order would be backpropagated into the wrong tree.
-        Each pending leaf is scattered back into its own root's position once
+        Each pending leaf is scattered back into its own fleet position once
         materialised, so the returned order matches ``roots`` regardless of which
         trees went pending.
         """
         leaves: list[MCTSNode[TPosition, TPly]] = []
-        # (parent, slot, root_index): root_index is where this pending
-        # materialisation's eventual node belongs in `leaves`, once the batch
-        # call below resolves it into a real node.
+        # (parent, slot, fleet_position): the slot is an index into `parent`'s
+        # arrays, the fleet position an index into `roots`/`leaves`. Both are dense
+        # ints, so they are named apart deliberately — see the Vocabulary section of
+        # CLAUDE.md. fleet_position is where this pending materialisation's eventual
+        # node belongs in `leaves`, once the batch call below resolves it into a
+        # real node.
         pending: list[tuple[MCTSNode[TPosition, TPly], int, int]] = []
 
-        for root_index, root in enumerate(roots):
+        for fleet_position, root in enumerate(roots):
             current = root
 
             while current.child_count:
@@ -445,7 +450,7 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
                     # descending. `current` (the parent) is only a placeholder in
                     # `leaves` until the batch below replaces it with this tree's
                     # real leaf.
-                    pending.append((current, best_slot, root_index))
+                    pending.append((current, best_slot, fleet_position))
                     break  # Stop descending; can't proceed without materializing the child first.
 
             leaves.append(current)
@@ -458,7 +463,7 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
             plies = [parent.child_plies[slot] for parent, slot, _ in pending]
             successors = self._batch_ops.apply_plies(positions, plies)
 
-            for (parent, slot, root_index), successor_position in zip(pending, successors, strict=True):
+            for (parent, slot, fleet_position), successor_position in zip(pending, successors, strict=True):
                 # slot=slot is required, not optional: it is how this node's
                 # statistics resolve through its parent's arrays (see
                 # visits/total_value/record_visit), and backpropagation starts
@@ -470,7 +475,7 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
                     slot=slot,
                 )
                 parent.children[slot] = new_node
-                leaves[root_index] = new_node
+                leaves[fleet_position] = new_node
 
         return leaves
 
@@ -492,8 +497,8 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
 
         Pairs ``leaves`` with ``evaluations`` by index. Both arrive already narrowed to
         the non-terminal leaves of one iteration, so this method works entirely in that
-        narrowed space and never sees a slot index — mapping results back to games is
-        the caller's business.
+        narrowed space and never sees a fleet position — mapping results back to games
+        is the caller's business.
 
         This is the one place ``PositionEvaluation.policy``'s ``str(ply)`` keying is
         consumed: the policy is read into the leaf's priors array, positionally by

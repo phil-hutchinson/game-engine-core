@@ -512,3 +512,29 @@ is expensive, or batched onto a device, pays the timings above out of a much
 larger total and collects a 4.5x cut in transitions for it. The regression in
 this document is measured against the most hostile possible downstream and
 should be read as an upper bound on the harm.
+
+## Sign-off
+
+**Ship as measured.** Taken deliberately, with the regression in the four cells
+above understood and accepted, on the reasoning already set out in this
+document: the shipped cost is the bounded one, and both games measured here are
+illustrative examples of library usage rather than evidence about a consuming
+game's branching factor.
+
+No whole-search measurement above the ~30 crossover backs this up, and none is
+being manufactured to. `selection_sweep.py` isolates the *kernel*, so it is
+silent on the 34–57% of runtime outside selection; producing a credible
+whole-search number at a real width would mean building the synthetic
+configurable-branching-and-depth position that
+[`doc/proposed_stories/reduce-puct-selection-cost.md`](../../proposed_stories/reduce-puct-selection-cost.md)
+lists as not-yet-existing. That is a fixture that would only ever approximate the
+thing it stands in for, and the first real consuming game supplies the same
+answer directly and for free.
+
+**Reassess from a real game.** The trigger is the first game that consumes this
+library at a known branching factor and depth — profile what share of search
+time selection actually takes there, and read the result against the trigger
+conditions in the proposed story (below ~19 favours D, above ~30 favours the
+shipped kernel plus E, between the two favours E). Until such a game exists the
+question is not answerable with anything better than the bounding argument, and
+the cost of waiting is capped at roughly 3 µs per node scored.

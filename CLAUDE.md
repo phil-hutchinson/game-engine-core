@@ -29,3 +29,9 @@ Before creating or modifying an `implementation-plan.md`, read `doc/guidelines/i
 For this repository, the following terms should be used:
 
 **Ply** — a single action taken by one player in a turn-based game. Preferred over "move" to avoid ambiguity: in common usage "move" can mean one player's action *or* a full round of actions by all players. A ply is always unambiguous — it refers strictly to one player's turn.
+
+**Slot** — an index into one search node's parallel `child_*` arrays, one per legal ply at that node. Slots are *within* a single node: `child_plies[slot]`, `child_priors[slot]`, `child_visits[slot]`. A child exists as a slot before it exists as an object, which is what makes lazy materialisation possible.
+
+**Fleet position** — an index into a fleet of independent games searched in lockstep, one per game. Fleet positions are *across* games: `positions[fleet_position]` is that game's position, and the result at the same index is that game's result.
+
+Never call a fleet position a slot. Both are dense integer indices from zero and they appear together in the same expressions, so confusing them backpropagates a value into the wrong game's tree — a failure that produces plausible-looking output rather than an error. Where a batched call is narrowed to a subset of the fleet (only the games still pending), the index into that *narrowed* list is neither of these; leave it unnamed, or call it a batch position, and keep the mapping back to fleet positions explicit.

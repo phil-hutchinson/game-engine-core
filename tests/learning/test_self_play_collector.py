@@ -34,10 +34,10 @@ def _collector(starting_pile: int) -> SelfPlayCollector[NimPly, NimPosition]:
 
 
 def _piles(*starting_piles: int) -> Callable[[], NimPosition]:
-    """A position factory handing out a different starting pile per game, in slot order.
+    """A position factory handing out a different starting pile per game, in fleet order.
 
     The factory stays scalar under the fleet — a game's starting position is a
-    per-game concern — so successive calls are what distinguish one slot from another.
+    per-game concern — so successive calls are what distinguish one game from another.
     """
     remaining = iter(starting_piles)
     return lambda: NimPosition(pile=next(remaining), takes=(1,))
@@ -123,7 +123,7 @@ def test_policy_transform_receives_one_batch_per_turn_paired_by_index() -> None:
 
     for positions, policies in received:
         assert len(positions) == len(policies)
-    # One call per turn, each carrying the live games in slot order: all three
+    # One call per turn, each carrying the live games in fleet order: all three
     # count down together until the pile-3 game retires, then the pile-4 one.
     assert [[position.pile for position in positions] for positions, _ in received] == [
         [3, 4, 5],
@@ -132,7 +132,7 @@ def test_policy_transform_receives_one_batch_per_turn_paired_by_index() -> None:
         [1, 2],
         [1],
     ]
-    # Slot order in, slot order out. Each game's samples run newest step first, so
+    # Fleet order in, fleet order out. Each game's samples run newest step first, so
     # the tags read backwards through that game's turns: the pile-5 game was row 2
     # until the pile-3 game left, then row 1, then row 0 on its final turn.
     assert [sample.target_policy for sample in samples] == [
@@ -161,12 +161,12 @@ def test_a_fleet_matches_the_same_games_played_one_at_a_time() -> None:
 
 
 def test_games_of_different_lengths_retire_without_disturbing_each_other() -> None:
-    # Piles 5, 3 and 4 run 5, 3 and 4 turns, so the games retire in the order slot 1,
-    # slot 2, slot 0. Each game's values must alternate back from its own winner and
+    # Piles 5, 3 and 4 run 5, 3 and 4 turns, so the games retire in the order game 1,
+    # game 2, game 0. Each game's values must alternate back from its own winner and
     # its encodings count down its own pile, unaffected by the others' lengths — and
     # the deliberately unsorted piles mean returning the buckets in the order the
     # games finished would fail here, where an ascending fleet would coincide with
-    # slot order and hide it.
+    # fleet order and hide it.
     collector = SelfPlayCollector(
         evaluator=NimNNEvaluator(model=NimMLP()),
         engine_factory=lambda: MCTSEngine(evaluator=NullEvaluator(), iterations=10),
@@ -314,8 +314,8 @@ def test_an_empty_fleet_plays_no_turns() -> None:
 
 
 def test_a_game_starting_terminal_retires_before_it_is_ever_searched() -> None:
-    # An empty pile is already decided, so slot 1 contributes no samples: there is
-    # no step to back-fill. It must also never reach the engine — a terminal slot
+    # An empty pile is already decided, so game 1 contributes no samples: there is
+    # no step to back-fill. It must also never reach the engine — a terminal game
     # makes select_plies_for_training raise, which would forfeit the searches of
     # every other game in the fleet, not just its own.
     search_widths: list[int] = []
@@ -330,7 +330,7 @@ def test_a_game_starting_terminal_retires_before_it_is_ever_searched() -> None:
     )
     samples = collector.collect(n_games=3)
 
-    # The live games' samples, in slot order, with the decided game's slot absent
+    # The live games' samples, in fleet order, with the decided game absent
     # rather than empty-padded: pile 3 (player 1 wins), then pile 2 (player 2 wins).
     assert [sample.target_value for sample in samples] == [1.0, -1.0, 1.0, 1.0, -1.0]
     assert [float(sample.encoded_position[0]) for sample in samples] == [1.0, 2.0, 3.0, 1.0, 2.0]
