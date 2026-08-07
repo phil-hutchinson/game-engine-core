@@ -7,7 +7,7 @@ things only a fleet can get wrong. Two themes:
   make exactly one evaluator call, of width N — that is the whole point of the
   plural form. Terminal leaves are scored from their outcome and drop out of the
   batch, narrowing it without costing their game its iteration.
-- **Lanes.** Game identity is the slot index. A result that came back in the wrong
+- **Lanes.** Game identity is the fleet position. A result that came back in the wrong
   order would be a silent, plausible-looking wrong answer, so alignment is tested
   against positions whose correct answers cannot be confused.
 
@@ -21,7 +21,7 @@ from typing import Literal
 
 import pytest
 
-from game_engine_core.engines.mcts_engine import MCTSEngine
+from game_engine_core.engines.mcts_engine import MCTSEngine, MCTSNode
 from game_engine_core.evaluators.null_evaluator import NullEvaluator
 from game_engine_core.game.batch_position_processor import BatchPositionProcessor
 from game_engine_core.models.position_evaluation import PositionEvaluation
@@ -89,7 +89,7 @@ def _fleet_engine(
 def test_each_iteration_makes_one_evaluator_call_spanning_the_whole_fleet() -> None:
     # The story's central claim: N games' evaluations are collected into one forward
     # pass per iteration instead of N calls of width one. Three deep piles keep every
-    # selected leaf non-terminal, so no slot ever drops out of the batch.
+    # selected leaf non-terminal, so no game ever drops out of the batch.
     engine, evaluator = _fleet_engine(iterations=5)
 
     engine.select_plies_for_training([NimPosition(pile=DEEP_PILE)] * 3)
@@ -106,10 +106,10 @@ def test_a_single_game_is_the_fleet_at_width_one() -> None:
 
 
 def test_results_are_aligned_with_the_positions_they_came_from() -> None:
-    # Each slot's policy must cover its own position's legal plies. Pile 1 has a
+    # Each game's policy must cover its own position's legal plies. Pile 1 has a
     # single legal ply and pile 5 has two, so a swapped result is not merely wrong
-    # but impossible — the pile-1 slot cannot legitimately offer a take of 2.
-    # The forced slot goes first deliberately: a fleet whose key-set signature reads
+    # but impossible — the pile-1 game cannot legitimately offer a take of 2.
+    # The forced game goes first deliberately: a fleet whose key-set signature reads
     # the same backwards would pass under a reversed result order.
     engine, _ = _fleet_engine(iterations=20)
 
@@ -118,11 +118,11 @@ def test_results_are_aligned_with_the_positions_they_came_from() -> None:
     )
 
     assert [set(policy) for _, policy in results] == [{"1"}, {"1", "2"}, {"1", "2"}]
-    # The forced slot's ply is the one ply it has, whatever the search did elsewhere.
+    # The forced game's ply is the one ply it has, whatever the search did elsewhere.
     assert results[0][0].take == 1
 
 
-def test_slot_order_follows_the_input_order_not_the_position_contents() -> None:
+def test_fleet_order_follows_the_input_order_not_the_position_contents() -> None:
     # The same two positions in both orders: the results must swap with them. Guards
     # against an implementation that happens to be right for one ordering — e.g. one
     # that sorted or grouped the batch and never mapped it back.
@@ -139,7 +139,7 @@ def test_terminal_leaves_leave_the_batch_without_costing_their_game_an_iteration
     # Pile 1: iteration 1 evaluates and expands the root, whose only child is the
     # empty pile — terminal. Every later iteration selects that child, reads its
     # outcome and skips the evaluator, so the batch narrows from 2 to 1 while the
-    # deep slot keeps evaluating.
+    # deep game keeps evaluating.
     engine, evaluator = _fleet_engine(iterations=3)
     roots = engine._create_roots(  # pyright: ignore[reportPrivateUsage]
         [NimPosition(pile=1), NimPosition(pile=DEEP_PILE)]
@@ -154,7 +154,7 @@ def test_terminal_leaves_leave_the_batch_without_costing_their_game_an_iteration
 
 
 def test_an_all_terminal_iteration_never_reaches_the_evaluator() -> None:
-    # Both slots are pile 1, so after the first iteration expands both roots every
+    # Both games are pile 1, so after the first iteration expands both roots every
     # subsequent iteration selects a terminal leaf in every tree and the non-terminal
     # partition is empty. Routine late in a game, and the evaluator must not be
     # handed an empty batch.
@@ -169,8 +169,8 @@ def test_an_all_terminal_iteration_never_reaches_the_evaluator() -> None:
     assert [root.visits for root in roots] == [4, 4]
 
 
-def test_each_slot_gets_its_own_tree_and_its_own_iteration_budget() -> None:
-    # Equal positions in two slots are the case where a leaked or shared tree would
+def test_each_fleet_position_gets_its_own_tree_and_its_own_iteration_budget() -> None:
+    # Equal positions in two fleet positions are the case where a leaked or shared tree would
     # look most plausible: the answers would still be identical. Visit counts are
     # what give it away — each root must absorb the full budget, not a share of it.
     engine, _ = _fleet_engine(iterations=8)
@@ -182,6 +182,9 @@ def test_each_slot_gets_its_own_tree_and_its_own_iteration_budget() -> None:
 
     assert [root.visits for root in roots] == [8, 8]
     assert roots[0] is not roots[1]
+    # The statistics arrays are where a shared tree would show up now that a
+    # child's visits and values live on its parent rather than on itself.
+    assert roots[0].child_visits is not roots[1].child_visits
     assert roots[0].children[0] is not roots[1].children[0]
 
 
@@ -220,12 +223,11 @@ def test_width_one_training_search_agrees_with_the_play_path() -> None:
     assert played.take == trained.take
 
 
-def test_expansion_builds_every_successor_in_the_fleet_in_one_call() -> None:
-    # One iteration over three deep piles expands all three roots, and each has two
-    # legal plies — six successors in total. They must arrive as a single width-6
-    # call, not six calls of width one and not three calls of width two: a leaf's own
-    # children were already a batch before the fleet existed, and the fleet collapses
-    # those batches together.
+def test_expansion_never_calls_apply_plies() -> None:
+    # #26 Step 4: expansion gives every leaf priors, nothing more — successor
+    # positions are no longer built for every legal ply up front. One iteration
+    # over three deep piles does nothing but expand the three roots (each is its
+    # own first leaf), so apply_plies must not be called at all.
     recorder = _WidthRecordingBatchProcessor()
     engine = MCTSEngine(
         evaluator=_WidthRecordingEvaluator(), iterations=1, batch_ops=recorder
@@ -233,19 +235,132 @@ def test_expansion_builds_every_successor_in_the_fleet_in_one_call() -> None:
 
     engine.select_plies_for_training([NimPosition(pile=DEEP_PILE)] * 3)
 
-    assert recorder.apply_plies_widths == [6]
+    assert recorder.apply_plies_widths == []
     # Expansion asks for legality once for the whole fleet too, which #22 already
     # batched. Only the first entry belongs to expansion; later ones come from
     # choosing a ply once the search is over.
     assert recorder.legal_plies_widths[0] == 3
 
 
-def test_the_zero_visit_fallback_still_asks_for_legality_one_slot_at_a_time() -> None:
+def test_lazy_materialisation_builds_one_successor_per_tree_in_one_batched_call() -> None:
+    # #26 Step 5: a slot's successor is still built the first time descent picks
+    # it, but every tree's pending materialisation for the wave is resolved by
+    # one batched apply_plies call rather than one call per tree. The first
+    # iteration only expands the three roots (each is its own first leaf, so
+    # nothing is pending yet); the second iteration has all three trees descend
+    # into their best slot and go pending together, producing exactly one call
+    # of width 3 — not three calls of width 1.
+    recorder = _WidthRecordingBatchProcessor()
+    engine = MCTSEngine(
+        evaluator=_WidthRecordingEvaluator(), iterations=2, batch_ops=recorder
+    )
+
+    engine.select_plies_for_training([NimPosition(pile=DEEP_PILE)] * 3)
+
+    assert recorder.apply_plies_widths == [3]
+
+
+def test_one_wave_issues_at_most_one_apply_plies_call_bounded_by_fleet_size() -> None:
+    # #26 Step 5: descent defers materialisation until the whole fleet has
+    # descended, so a wave's pending slots are resolved by a single apply_plies
+    # call rather than one per tree — and that call's width is bounded by how
+    # many trees went pending, never by branching factor. Four deep piles branch
+    # at 2: the first iteration only expands the roots (nothing pending yet, so
+    # apply_plies is not called at all that wave), and the second has all four
+    # trees pick their best, unmaterialised slot and go pending together.
+    fleet_size = 4
+    recorder = _WidthRecordingBatchProcessor()
+    engine = MCTSEngine(
+        evaluator=_WidthRecordingEvaluator(), iterations=2, batch_ops=recorder
+    )
+
+    engine.select_plies_for_training([NimPosition(pile=DEEP_PILE)] * fleet_size)
+
+    # Two waves ran; at most one of them had anything pending, so at most one
+    # apply_plies call exists in total, and its width cannot exceed the fleet.
+    assert len(recorder.apply_plies_widths) <= 1
+    assert all(width <= fleet_size for width in recorder.apply_plies_widths)
+    # This particular wave did have every tree go pending together.
+    assert recorder.apply_plies_widths == [fleet_size]
+
+
+def test_a_wave_that_only_revisits_materialised_slots_issues_no_apply_plies_call() -> None:
+    # #26 Step 5: once a slot's successor is materialised, a later wave that
+    # descends straight into it again has nothing pending — the descent stops
+    # at an already-materialised leaf and never reaches the "unmaterialised
+    # slot" branch. Two piles of 1 under the single-take fixture (takes=(1,))
+    # both terminate after one ply: iteration 1 expands the bare roots
+    # (nothing pending), iteration 2 materialises both single children — which
+    # land on pile 0, terminal — in one batched call, and iteration 3
+    # re-descends straight into those already-materialised terminal leaves,
+    # contributing no apply_plies call at all.
+    recorder = _WidthRecordingBatchProcessor()
+    engine = MCTSEngine(
+        evaluator=_WidthRecordingEvaluator(), iterations=3, batch_ops=recorder
+    )
+    roots = engine._create_roots(  # pyright: ignore[reportPrivateUsage]
+        [NimPosition(pile=1, takes=(1,)), NimPosition(pile=1, takes=(1,))]
+    )
+
+    engine._grow_trees(roots)  # pyright: ignore[reportPrivateUsage]
+
+    # Only iteration 2 had anything pending (both trees' single slot); the list
+    # has exactly one entry even though three waves ran, so iteration 3 is the
+    # zero-apply_plies wave this test is pinning.
+    assert recorder.apply_plies_widths == [2]
+
+
+def _tree_root_of(node: MCTSNode[NimPosition, NimPly]) -> MCTSNode[NimPosition, NimPly]:
+    """Walk up to the root of whichever tree this node actually belongs to."""
+    while node.parent is not None:
+        node = node.parent
+    return node
+
+
+def test_a_leaf_materialised_for_a_pending_tree_lands_in_that_tree_not_another() -> None:
+    # #26 Step 5: the scatter back, `leaves[fleet_position] = new_node`. Its failure
+    # mode is a materialised leaf landing in another tree's fleet position, and that
+    # only bites when the pending set is a *strict subset* of the fleet — with every
+    # tree pending the pending list and the fleet are the same sequence in the same
+    # order, so an off-by-one scatter is indistinguishable from a correct one.
+    #
+    # Fleet position 0 is pile 1 under the single-take fixture, so by iteration 3 its
+    # only child is pile 0 (terminal, already materialised) and descent stops there
+    # with nothing pending. Fleet position 1 is a deep pile still opening new slots,
+    # so it alone goes pending — the subset case. Asserting on parent chains rather
+    # than on call widths: a mis-scatter keeps the widths correct and only shows up
+    # as a leaf whose ancestry runs back to the wrong root.
+    recorder = _WidthRecordingBatchProcessor()
+    engine = MCTSEngine(
+        evaluator=_WidthRecordingEvaluator(), iterations=1, batch_ops=recorder
+    )
+    roots = engine._create_roots(  # pyright: ignore[reportPrivateUsage]
+        [NimPosition(pile=1, takes=(1,)), NimPosition(pile=DEEP_PILE)]
+    )
+
+    # Two iterations to reach the state described above, then select once more and
+    # inspect what that third descent returns.
+    for _ in range(2):
+        engine._mcts_iteration(roots)  # pyright: ignore[reportPrivateUsage]
+    recorder.apply_plies_widths.clear()
+    leaves = engine._select_leaves(roots)  # pyright: ignore[reportPrivateUsage]
+
+    # A strict subset went pending: one tree materialised, the other did not.
+    assert recorder.apply_plies_widths == [1]
+    # The property the scatter exists to preserve.
+    assert [_tree_root_of(leaf) for leaf in leaves] == list(roots)
+    # And specifically: the materialised leaf belongs to the deep tree, not to the
+    # terminal one that happened to sit at fleet position 0.
+    assert leaves[0].position.pile == 0
+    assert leaves[1].position.pile < DEEP_PILE
+
+
+def test_the_zero_visit_fallback_still_asks_for_legality_one_game_at_a_time() -> None:
     """Pins the width-one residue documented on MCTSEngine._visit_distribution."""
     # Documents a known width-one residue rather than endorsing it. A budget of one
     # expands each root but never descends past it, so every child sits at 0 visits
     # and the visit distribution falls back to a uniform over legal plies — asked for
-    # per slot, since that fallback was never widened. It fires only when the budget
+    # per game, since that fallback was never widened. It fires only when the budget
     # cannot descend past a root, which is why it is tolerable; if it is ever widened,
     # this expectation becomes a single width-3 call.
     recorder = _WidthRecordingBatchProcessor()
@@ -266,10 +381,10 @@ class _PolicyMissingTakeTwoEvaluator:
 
 
 def test_an_incomplete_policy_leaves_every_leaf_in_the_batch_unexpanded() -> None:
-    # Expansion is all-or-nothing across the fleet, not just within one leaf. Slot 0
+    # Expansion is all-or-nothing across the fleet, not just within one leaf. Game 0
     # is pile 1, whose single legal ply the policy covers, so it would expand cleanly
-    # on its own; slot 1 is pile 5, where the missing take-2 entry raises. Because
-    # every prior resolves before any successor is built, the valid slot must be left
+    # on its own; game 1 is pile 5, where the missing take-2 entry raises. Because
+    # every prior resolves before any successor is built, the valid game must be left
     # unexpanded too — otherwise it would read as expanded and never be evaluated again.
     engine: MCTSEngine[NimPly, NimPosition, _PolicyMissingTakeTwoEvaluator] = MCTSEngine(
         evaluator=_PolicyMissingTakeTwoEvaluator(), iterations=5
@@ -281,7 +396,7 @@ def test_an_incomplete_policy_leaves_every_leaf_in_the_batch_unexpanded() -> Non
     with pytest.raises(ValueError, match="'2'"):
         engine._grow_trees(roots)  # pyright: ignore[reportPrivateUsage]
 
-    assert [root.children for root in roots] == [[], []]
+    assert [root.child_count for root in roots] == [0, 0]
 
 
 def test_the_training_path_retains_nothing_between_calls() -> None:
