@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "game-engine-core"
-version = "0.1.0"
+version = "0.1.5"
 requires-python = ">=3.12"
 # The MCTS tree stores child statistics as parallel arrays on the parent and
 # scores PUCT over them in one vectorised op (issue #26), so numpy is a runtime
