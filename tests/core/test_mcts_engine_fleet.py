@@ -21,7 +21,7 @@ from typing import Literal
 
 import pytest
 
-from game_engine_core.engines.mcts_engine import MCTSEngine
+from game_engine_core.engines.mcts_engine import MCTSEngine, MCTSNode
 from game_engine_core.evaluators.null_evaluator import NullEvaluator
 from game_engine_core.game.batch_position_processor import BatchPositionProcessor
 from game_engine_core.models.position_evaluation import PositionEvaluation
@@ -308,6 +308,51 @@ def test_a_wave_that_only_revisits_materialised_slots_issues_no_apply_plies_call
     # has exactly one entry even though three waves ran, so iteration 3 is the
     # zero-apply_plies wave this test is pinning.
     assert recorder.apply_plies_widths == [2]
+
+
+def _tree_root_of(node: MCTSNode[NimPosition, NimPly]) -> MCTSNode[NimPosition, NimPly]:
+    """Walk up to the root of whichever tree this node actually belongs to."""
+    while node.parent is not None:
+        node = node.parent
+    return node
+
+
+def test_a_leaf_materialised_for_a_pending_tree_lands_in_that_tree_not_another() -> None:
+    # #26 Step 5: the scatter back, `leaves[fleet_position] = new_node`. Its failure
+    # mode is a materialised leaf landing in another tree's fleet position, and that
+    # only bites when the pending set is a *strict subset* of the fleet — with every
+    # tree pending the pending list and the fleet are the same sequence in the same
+    # order, so an off-by-one scatter is indistinguishable from a correct one.
+    #
+    # Fleet position 0 is pile 1 under the single-take fixture, so by iteration 3 its
+    # only child is pile 0 (terminal, already materialised) and descent stops there
+    # with nothing pending. Fleet position 1 is a deep pile still opening new slots,
+    # so it alone goes pending — the subset case. Asserting on parent chains rather
+    # than on call widths: a mis-scatter keeps the widths correct and only shows up
+    # as a leaf whose ancestry runs back to the wrong root.
+    recorder = _WidthRecordingBatchProcessor()
+    engine = MCTSEngine(
+        evaluator=_WidthRecordingEvaluator(), iterations=1, batch_ops=recorder
+    )
+    roots = engine._create_roots(  # pyright: ignore[reportPrivateUsage]
+        [NimPosition(pile=1, takes=(1,)), NimPosition(pile=DEEP_PILE)]
+    )
+
+    # Two iterations to reach the state described above, then select once more and
+    # inspect what that third descent returns.
+    for _ in range(2):
+        engine._mcts_iteration(roots)  # pyright: ignore[reportPrivateUsage]
+    recorder.apply_plies_widths.clear()
+    leaves = engine._select_leaves(roots)  # pyright: ignore[reportPrivateUsage]
+
+    # A strict subset went pending: one tree materialised, the other did not.
+    assert recorder.apply_plies_widths == [1]
+    # The property the scatter exists to preserve.
+    assert [_tree_root_of(leaf) for leaf in leaves] == list(roots)
+    # And specifically: the materialised leaf belongs to the deep tree, not to the
+    # terminal one that happened to sit at fleet position 0.
+    assert leaves[0].position.pile == 0
+    assert leaves[1].position.pile < DEEP_PILE
 
 
 def test_the_zero_visit_fallback_still_asks_for_legality_one_game_at_a_time() -> None:

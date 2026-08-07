@@ -14,13 +14,21 @@ below is reproducible from one of:
 | `ply_sequences.py` | fixed-seed self-play, for the non-goal check |
 
 None of them is a deliverable and none is collected by pytest (`testpaths`
-covers `tests` and `examples` only).
+covers `tests` and `examples` only). The plan anticipated one instrument and
+five landed; they are kept because the analysis above is not reproducible
+without them.
+
+**Rot policy: these five are run by hand, never in CI, and are not maintained
+against the engine.** A future refactor is free to break them. If one no longer
+runs, that is an artefact of the code having moved on, not a bug to fix — repair
+it only if the measurement is wanted again, and delete it rather than carry it
+broken. The numbers already recorded in this file stand on their own.
 
 Read `benchmark.py`'s module docstring for what the columns mean. In short:
 `wall` is the fastest repeat of a full `select_plies_for_training` call, and
 `iters/s` is tree-iterations per second (`iterations x fleet / wall`) — the
 figure to compare across steps, and the only one comparable across fleet sizes.
-`signature` is a checksum of slot 0's search result; the story's non-goal is that
+`signature` is a checksum of fleet position 0's search result; the story's non-goal is that
 search results do not move, so it must stay identical for a given cell across
 every step.
 

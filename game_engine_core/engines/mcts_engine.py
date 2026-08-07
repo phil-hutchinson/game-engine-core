@@ -25,7 +25,11 @@ for _empty in (_NO_PRIORS, _NO_VISITS, _NO_VALUES):
     _empty.setflags(write=False)
 
 
-@dataclass
+# eq=False: the generated __eq__ would compare every field as a tuple, including
+# three ndarrays, which raises rather than returning a bool as soon as the game's
+# position and ply types have value equality. Identity is what every caller here
+# already relies on, and it keeps the node hashable.
+@dataclass(eq=False)
 class MCTSNode[TPosition: GamePosition[Any], TPly: GamePly]:
     """A node in the MCTS tree, holding its children's statistics as arrays.
 
@@ -130,7 +134,7 @@ class MCTSNode[TPosition: GamePosition[Any], TPly: GamePly]:
             self.child_total_values,
             self.child_visits,
             where=(self.child_visits != 0),
-            out = average_values,
+            out=average_values,
         )
         exploitation = -average_values
 
@@ -230,7 +234,9 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
             new_root: MCTSNode[TPosition, TPly] = MCTSNode(
                 position=new_position, parent=old_root, ply_from_parent=ply_from_old_root, slot=new_slot
             )
-            old_root.children[new_slot] = new_root
+            # Deliberately not written into old_root.children: detach_as_root reads
+            # the statistics through (parent, slot), not through that dict, and
+            # old_root is dropped on the next line.
             new_root.detach_as_root()
             self._root_node = new_root
 
@@ -493,7 +499,8 @@ class MCTSEngine[TPly: GamePly, TPosition: GamePosition[Any], TEvaluator: Positi
         method at all: ``_select_leaves`` defers materialisation for every slot
         a descent actually selects until the whole fleet has descended, then
         resolves them all in one batched call (``observe_ply``, for re-rooting,
-        still materialises a single slot on demand, at width one).
+        materialises a single slot from the position the caller already supplies,
+        so it costs no ``apply_plies`` call at all).
 
         Pairs ``leaves`` with ``evaluations`` by index. Both arrive already narrowed to
         the non-terminal leaves of one iteration, so this method works entirely in that

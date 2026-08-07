@@ -16,6 +16,8 @@ The folder `doc/plan/{story-name}/` (where the story name can be derived from th
 - **`implementation-plan.md`** — the plan describing what was intended to be implemented
 - **`\peer-review.md`** - a peer review that also includes status and resolution of peer review items
 
+The folder `doc/proposed_stories/` holds work that has been thought through but not scheduled, and is not yet an issue — typically a follow-up a story surfaced and deliberately deferred, written up so the reasoning does not have to be rederived. One markdown file per proposal; see that folder's `README.md` for what belongs there and how an entry graduates to an issue. The convention was introduced by story 26.
+
 ## Implementation Strategy
 
 The **`implementation-plan.md`** will contain one or more steps, each with a testing strategy. Progress through steps one at a time, pausing after each one to receive confirmation from the developer that the step has been implemented correctly and that there are no issues. In the case that the testing is manual, you may provide the developer with a reminder of what needs to be tested and how this can be done. Always check for files that have not been committed before beginning a new step: if there are files that have not been committed, **stop** and verify whether the developer wants to commit the existing files before continuing.

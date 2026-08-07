@@ -452,7 +452,9 @@ def test_observe_ply_onto_a_legal_unvisited_ply_materialises_rather_than_discard
     assert new_root.position.pile == new_position.pile
     assert new_root.parent is None
     assert new_root.slot is None
-    assert new_root is root.children[_slot_of(root, "1")]
+    # The discarded root is left untouched: the new root is reached by detaching,
+    # not by being linked into a parent that is about to go away.
+    assert root.children == {}
 
 
 def test_observe_ply_miss_clears_root_and_rebuilds() -> None:

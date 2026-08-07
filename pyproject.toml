@@ -11,7 +11,11 @@ requires-python = ">=3.12"
 # requirement of game_engine_core itself, not just of the learning extra. It
 # also covers the "numpy not found" warning torch emits on import, which is why
 # the learning extra no longer pins it separately.
-dependencies = ["numpy"]
+# Floor is 2.0 rather than the 1.21 that numpy.typing.NDArray actually needs:
+# all measurement was taken against 2.5.1, 1.x is in maintenance, and there is
+# no reason for a package adding numpy today to start out supporting a
+# generation it has never been tested against.
+dependencies = ["numpy>=2.0"]
 
 [project.optional-dependencies]
 learning = ["torch>=2.0"]
